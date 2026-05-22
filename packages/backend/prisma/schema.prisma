@@ -1,0 +1,338 @@
+// ============================================================
+// TAVOLO POS — Prisma Schema v2 (Multi-sede)
+// Arquitectura: Organisation → Venue → Tables/Products/Orders
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ORGANIZACIÓN ──────────────────────────────────────────────────────────
+
+model Organisation {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(200)
+  nif       String   @db.VarChar(20)
+  address   String?  @db.VarChar(500)
+  phone     String?  @db.VarChar(20)
+  email     String?  @db.VarChar(255)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venues Venue[]
+  users  User[]
+
+  @@map("organisations")
+}
+
+// ─── SEDE ──────────────────────────────────────────────────────────────────
+
+model Venue {
+  id             Int          @id @default(autoincrement())
+  organisationId Int
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  name           String       @db.VarChar(200)
+  slug           String       @unique @db.VarChar(100)
+  address        String?      @db.VarChar(500)
+  phone          String?      @db.VarChar(20)
+  timezone       String       @default("Europe/Madrid") @db.VarChar(50)
+  isActive       Boolean      @default(true)
+  useOrgNif      Boolean      @default(true)
+  nifOverride    String?      @db.VarChar(20)
+  nameOverride   String?      @db.VarChar(200)
+  invoiceSeries  String       @default("T") @db.VarChar(20)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  tables     Table[]
+  printers   Printer[]
+  categories Category[]
+  orders     Order[]
+  tickets    Ticket[]
+  venueUsers VenueUser[]
+  products   Product[]
+
+  @@map("venues")
+}
+
+// ─── USUARIOS ──────────────────────────────────────────────────────────────
+
+model User {
+  id             Int          @id @default(autoincrement())
+  name           String       @db.VarChar(100)
+  email          String       @unique @db.VarChar(255)
+  role           Role         @default(WAITER)
+  password       String       @db.VarChar(60)
+  organisationId Int
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  orders     Order[]
+  tickets    Ticket[]
+  venueUsers VenueUser[]
+
+  @@index([email])
+  @@index([organisationId, role])
+  @@map("users")
+}
+
+model VenueUser {
+  userId  Int
+  venueId Int
+  user    User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  venue   Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@id([userId, venueId])
+  @@map("venue_users")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  WAITER
+  KITCHEN
+
+  @@map("role")
+}
+
+// ─── MESAS ─────────────────────────────────────────────────────────────────
+
+model Table {
+  id      Int         @id @default(autoincrement())
+  venueId Int
+  venue   Venue       @relation(fields: [venueId], references: [id])
+  number  Int
+  name    String?     @db.VarChar(50)
+  seats   Int         @default(4)
+  zone    String?     @db.VarChar(50)
+  status  TableStatus @default(FREE)
+  posX    Int         @default(50)
+  posY    Int         @default(50)
+  objectType String     @default("TABLE") @db.VarChar(20)
+  width   Int         @default(0)
+  height  Int         @default(0)
+
+  orders Order[]
+
+  @@unique([venueId, number])
+  @@index([venueId, status])
+  @@map("tables")
+}
+
+enum TableStatus {
+  FREE
+  OCCUPIED
+  ORDERING
+  BILL_REQUESTED
+
+  @@map("table_status")
+}
+
+// ─── CATÁLOGO ──────────────────────────────────────────────────────────────
+
+model Category {
+  id        Int     @id @default(autoincrement())
+  venueId   Int
+  venue     Venue   @relation(fields: [venueId], references: [id])
+  name      String  @db.VarChar(100)
+  color     String? @db.VarChar(7)
+  icon      String? @db.VarChar(50)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  products       Product[]
+  modifierGroups ModifierGroup[]
+
+  @@index([venueId, isActive])
+  @@map("categories")
+}
+
+model ModifierGroup {
+  id            Int      @id @default(autoincrement())
+  categoryId    Int
+  category      Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name          String   @db.VarChar(100)
+  minSelections Int      @default(1)
+  maxSelections Int      @default(1)
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  options ModifierOption[]
+
+  @@index([categoryId, isActive])
+  @@map("modifier_groups")
+}
+
+model ModifierOption {
+  id         Int           @id @default(autoincrement())
+  groupId    Int
+  group      ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name       String        @db.VarChar(100)
+  priceDelta Decimal       @default(0.00) @db.Decimal(10, 2)
+  sortOrder  Int           @default(0)
+  isActive   Boolean       @default(true)
+
+  @@index([groupId, isActive])
+  @@map("modifier_options")
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  venueId     Int
+  venue       Venue    @relation(fields: [venueId], references: [id])
+  name        String   @db.VarChar(200)
+  description String?  @db.Text
+  price       Decimal  @db.Decimal(10, 2)
+  vatRate     Decimal  @default(10.00) @db.Decimal(5, 2)
+  categoryId  Int
+  category    Category @relation(fields: [categoryId], references: [id])
+  productType ProductType @default(NORMAL)
+  menuCourseTags String[] @default([])
+  menuConfig  Json?
+  isAvailable Boolean  @default(true)
+  imagePath   String?  @db.VarChar(255)
+  sortOrder   Int      @default(0)
+
+  orderItems OrderItem[]
+
+  @@index([venueId, categoryId])
+  @@index([venueId, isAvailable])
+  @@map("products")
+}
+
+enum ProductType {
+  NORMAL
+  MENU
+
+  @@map("product_type")
+}
+
+// ─── PEDIDOS ───────────────────────────────────────────────────────────────
+
+model Order {
+  id        Int         @id @default(autoincrement())
+  venueId   Int
+  venue     Venue       @relation(fields: [venueId], references: [id])
+  tableId   Int
+  table     Table       @relation(fields: [tableId], references: [id])
+  userId    Int
+  user      User        @relation(fields: [userId], references: [id])
+  status    OrderStatus @default(OPEN)
+  notes     String?     @db.Text
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  items  OrderItem[]
+  ticket Ticket?
+
+  @@index([venueId, tableId, status])
+  @@index([venueId, status])
+  @@map("orders")
+}
+
+enum OrderStatus {
+  OPEN
+  SENT_TO_KITCHEN
+  READY
+  CLOSED
+  CANCELLED
+
+  @@map("order_status")
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10, 2)
+  vatRate   Decimal @db.Decimal(5, 2)
+  notes     String? @db.VarChar(500)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// ─── MÓDULO FISCAL — VERI*FACTU ────────────────────────────────────────────
+
+model Ticket {
+  id      Int   @id @default(autoincrement())
+  venueId Int
+  venue   Venue @relation(fields: [venueId], references: [id])
+  orderId Int   @unique
+  order   Order @relation(fields: [orderId], references: [id])
+  userId  Int
+  user    User  @relation(fields: [userId], references: [id])
+
+  invoiceSeries String @db.VarChar(20)
+  invoiceNumber Int
+  invoiceCode   String @unique @db.VarChar(50)
+
+  subtotal  Decimal @db.Decimal(10, 2)
+  vatAmount Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+
+  hashSelf            String  @db.Char(64)
+  hashPrevious        String  @default("0000000000000000000000000000000000000000000000000000000000000000") @db.Char(64)
+  previousInvoiceCode String? @db.VarChar(50)
+
+  aeatStatus       AeatStatus @default(PENDING)
+  aeatSentAt       DateTime?
+  aeatResponseCode String?    @db.VarChar(50)
+  aeatResponseMsg  String?    @db.Text
+  aeatPayloadJson  String?    @db.Text
+
+  issuedAt        DateTime @default(now())
+  businessName    String   @db.VarChar(200)
+  businessNif     String   @db.VarChar(20)
+  businessAddress String   @db.VarChar(500)
+
+  @@unique([venueId, invoiceSeries, invoiceNumber])
+  @@index([venueId, issuedAt])
+  @@index([aeatStatus])
+  @@map("tickets")
+}
+
+enum AeatStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  ERROR
+
+  @@map("aeat_status")
+}
+
+// ─── IMPRESORAS ────────────────────────────────────────────────────────────
+
+model Printer {
+  id        Int         @id @default(autoincrement())
+  venueId   Int
+  venue     Venue       @relation(fields: [venueId], references: [id])
+  name      String      @db.VarChar(100)
+  ipAddress String      @db.VarChar(45)
+  port      Int         @default(9100)
+  type      PrinterType @default(RECEIPT)
+  isActive  Boolean     @default(true)
+
+  @@index([venueId, type, isActive])
+  @@map("printers")
+}
+
+enum PrinterType {
+  RECEIPT
+  KITCHEN
+  BAR
+
+  @@map("printer_type")
+}

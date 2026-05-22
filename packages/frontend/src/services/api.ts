@@ -1,0 +1,138 @@
+/// <reference types="vite/client" />
+/**
+ * ============================================================
+ * TAVOLO POS — API Client v2 (con Auth JWT + venueId)
+ * ============================================================
+ */
+import axios from 'axios';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order } from '../types';
+
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+
+export const apiClient = axios.create({ baseURL: BASE_URL });
+
+/** Inyecta JWT y X-Venue-Id en cada petición */
+apiClient.interceptors.request.use((cfg) => {
+  const token   = localStorage.getItem('tavolo_token');
+  const venueId = localStorage.getItem('tavolo_venue_id');
+  if (token)   cfg.headers.Authorization = `Bearer ${token}`;
+  if (venueId) cfg.headers['X-Venue-Id'] = venueId;
+  return cfg;
+});
+
+/** Si el token expira, redirigir a login */
+apiClient.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('tavolo_token');
+      localStorage.removeItem('tavolo_venue_id');
+      window.location.href = '/login';
+    }
+    return Promise.reject(err);
+  }
+);
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const authApi = {
+  login:   (email: string, password: string) =>
+    apiClient.post<AuthResponse>('/api/auth/login', { email, password }).then((r) => r.data),
+  me:      () => apiClient.get('/api/auth/me').then((r) => r.data.data),
+};
+
+// ── Tables ────────────────────────────────────────────────────────────────────
+export const tablesApi = {
+  getAll:        (venueId: number) =>
+    apiClient.get<{ data: Table[] }>('/api/tables', { params: { venueId } }).then((r) => r.data.data),
+  getById:       (id: number) =>
+    apiClient.get<{ data: Table }>(`/api/tables/${id}`).then((r) => r.data.data),
+  getByTable:    (tableId: number, venueId: number) =>
+    apiClient.get<{ data: Order | null }>(`/api/orders/table/${tableId}`, { params: { venueId } }).then((r) => r.data.data),
+  updateStatus:  (id: number, status: string) =>
+    apiClient.patch(`/api/tables/${id}/status`, { status }).then((r) => r.data.data),
+  requestBill:   (id: number) =>
+    apiClient.patch(`/api/tables/${id}/request-bill`).then((r) => r.data.data),
+};
+
+// ── Products ──────────────────────────────────────────────────────────────────
+export const productsApi = {
+  getCategories: (venueId: number) =>
+    apiClient.get<{ data: Category[] }>('/api/products', { params: { venueId } }).then((r) => r.data.data),
+};
+
+// ── Orders ────────────────────────────────────────────────────────────────────
+export const ordersApi = {
+  create:      (data: { tableId: number; venueId: number; items: { productId: number; quantity: number; notes?: string }[] }) =>
+    apiClient.post<{ data: Order }>('/api/orders', data).then((r) => r.data.data),
+  getByTable:  (tableId: number, venueId: number) =>
+    apiClient.get<{ data: Order | null }>(`/api/orders/table/${tableId}`, { params: { venueId } }).then((r) => r.data.data),
+  addItem:     (orderId: number, item: { productId: number; quantity: number; notes?: string }) =>
+    apiClient.post(`/api/orders/${orderId}/items`, item).then((r) => r.data.data),
+  sendToKitchen: (orderId: number) =>
+    apiClient.patch(`/api/orders/${orderId}/send-kitchen`).then((r) => r.data.data),
+  cancelAndFree: (orderId: number) =>
+    apiClient.patch(`/api/orders/${orderId}/cancel-and-free`).then((r) => r.data.data),
+  sendKitchenNote: (data: { venueId: number; tableId?: number; reference?: string; message: string }) =>
+    apiClient.post('/api/orders/kitchen-note', data).then((r) => r.data),
+};
+
+// ── Tickets ───────────────────────────────────────────────────────────────────
+export const ticketsApi = {
+  close: (data: { orderId: number; venueId: number; printerIp?: string; printerPort?: number }) =>
+    apiClient.post<{ data: { ticketId: number; invoiceCode: string; total: number; qrBase64?: string } }>
+      ('/api/tickets/close', data).then((r) => r.data.data),
+};
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+export const adminApi = {
+  // Organización
+  getOrg:        () => apiClient.get<{ data: Organisation & { venues: Venue[] } }>('/api/admin/organisation').then((r) => r.data.data),
+  updateOrg:     (data: Partial<Organisation>) => apiClient.put('/api/admin/organisation', data).then((r) => r.data.data),
+
+  // Sedes
+  getVenues:     () => apiClient.get<{ data: Venue[] }>('/api/admin/venues').then((r) => r.data.data),
+  getVenue:      (id: number) => apiClient.get<{ data: Venue }>(`/api/admin/venues/${id}`).then((r) => r.data.data),
+  createVenue:   (data: Partial<Venue>) => apiClient.post<{ data: Venue }>('/api/admin/venues', data).then((r) => r.data.data),
+  updateVenue:   (id: number, data: Partial<Venue>) => apiClient.put(`/api/admin/venues/${id}`, data).then((r) => r.data.data),
+  deleteVenue:   (id: number) => apiClient.delete(`/api/admin/venues/${id}`).then((r) => r.data),
+
+  // Categorías
+  getCategories: (venueId: number) => apiClient.get(`/api/admin/venues/${venueId}/categories`).then((r) => r.data.data),
+  createCategory:(venueId: number, data: unknown) => apiClient.post(`/api/admin/venues/${venueId}/categories`, data).then((r) => r.data.data),
+  updateCategory:(id: number, data: unknown) => apiClient.put(`/api/admin/categories/${id}`, data).then((r) => r.data.data),
+  deleteCategory:(id: number) => apiClient.delete(`/api/admin/categories/${id}`).then((r) => r.data),
+
+  // Productos
+  getProducts:   (venueId: number) => apiClient.get(`/api/admin/venues/${venueId}/products`).then((r) => r.data.data),
+  createProduct: (venueId: number, data: unknown) => apiClient.post(`/api/admin/venues/${venueId}/products`, data).then((r) => r.data.data),
+  updateProduct: (id: number, data: unknown) => apiClient.put(`/api/admin/products/${id}`, data).then((r) => r.data.data),
+  deleteProduct: (id: number) => apiClient.delete(`/api/admin/products/${id}`).then((r) => r.data),
+
+  // Mesas
+  getTables:     (venueId: number) => apiClient.get<{ data: Table[] }>(`/api/admin/venues/${venueId}/tables`).then((r) => r.data.data),
+  createTable:   (venueId: number, data: Partial<Table>) => apiClient.post(`/api/admin/venues/${venueId}/tables`, data).then((r) => r.data.data),
+  updateTable:   (id: number, data: Partial<Table>) => apiClient.put(`/api/admin/tables/${id}`, data).then((r) => r.data.data),
+  deleteTable:   (id: number) => apiClient.delete(`/api/admin/tables/${id}`).then((r) => r.data),
+
+  // Impresoras
+  getPrinters:   (venueId: number) => apiClient.get<{ data: Printer[] }>(`/api/admin/venues/${venueId}/printers`).then((r) => r.data.data),
+  createPrinter: (venueId: number, data: Partial<Printer>) => apiClient.post(`/api/admin/venues/${venueId}/printers`, data).then((r) => r.data.data),
+  updatePrinter: (id: number, data: Partial<Printer>) => apiClient.put(`/api/admin/printers/${id}`, data).then((r) => r.data.data),
+  deletePrinter: (id: number) => apiClient.delete(`/api/admin/printers/${id}`).then((r) => r.data),
+
+  // Usuarios
+  getUsers:      () => apiClient.get('/api/admin/users').then((r) => r.data.data),
+  createUser:    (data: unknown) => apiClient.post('/api/admin/users', data).then((r) => r.data.data),
+  updateUser:    (id: number, data: unknown) => apiClient.put(`/api/admin/users/${id}`, data).then((r) => r.data),
+
+  // Tickets
+  getTickets:    (venueId: number, params?: { limit?: number; offset?: number; aeatStatus?: string }) =>
+    apiClient.get(`/api/admin/venues/${venueId}/tickets`, { params }).then((r) => r.data),
+};
+
+export const printersApi = {
+  openDrawer: (venueId: number) =>
+    apiClient.post('/api/printers/open-drawer', { venueId }).then((r) => r.data),
+  getPreviewSamples: (venueId: number) =>
+    apiClient.get('/api/printers/preview-samples', { params: { venueId } }).then((r) => r.data.data),
+};
