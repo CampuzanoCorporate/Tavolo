@@ -58,5 +58,10 @@ exports.config = {
         // certPath: optional('CERT_PATH', ''),
         // certPassword: optional('CERT_PASSWORD', ''),
     },
+    licensing: {
+        masterKey: optional('LICENSE_MASTER_KEY', ''),
+        defaultValidityDays: parseInt(optional('LICENSE_VALIDITY_DAYS', '30'), 10),
+        defaultGraceDays: parseInt(optional('LICENSE_GRACE_DAYS', '7'), 10),
+    },
 };
 //# sourceMappingURL=index.js.map

@@ -30,6 +30,11 @@ export declare const config: {
     readonly aeat: {
         readonly endpointUrl: string;
     };
+    readonly licensing: {
+        readonly masterKey: string;
+        readonly defaultValidityDays: number;
+        readonly defaultGraceDays: number;
+    };
 };
 export type Config = typeof config;
 //# sourceMappingURL=index.d.ts.map

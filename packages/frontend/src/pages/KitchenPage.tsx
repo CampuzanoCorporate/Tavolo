@@ -4,6 +4,8 @@ import { ordersApi } from '../services/api';
 import { useAppStore } from '../store/useAppStore';
 import type { KitchenQueueItem, KitchenQueueSummaryItem, ProductionStation } from '../types';
 
+type KitchenFilter = 'ALL' | 'PENDING' | 'IN_PROGRESS';
+
 export function KitchenPage() {
   const { currentVenue, currentVenueId } = useAppStore();
   const [items, setItems] = useState<KitchenQueueItem[]>([]);
@@ -14,6 +16,7 @@ export function KitchenPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [completingOrderId, setCompletingOrderId] = useState<number | null>(null);
   const [updatingItemId, setUpdatingItemId] = useState<number | null>(null);
+  const [activeFilter, setActiveFilter] = useState<KitchenFilter>('ALL');
   const previousIdsRef = useRef<string[]>([]);
 
   // Estados añadidos para KDS Historial y Comanda Completa
@@ -24,6 +27,7 @@ export function KitchenPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [orderDetailItems, setOrderDetailItems] = useState<KitchenQueueItem[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [selectedKitchenItem, setSelectedKitchenItem] = useState<KitchenQueueItem | null>(null);
 
   const loadHistory = async (silent = false) => {
     if (!currentVenueId) return;
@@ -110,9 +114,14 @@ export function KitchenPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentVenueId, selectedStationId, isHistoryOpen]);
 
+  const filteredItems = useMemo(() => {
+    if (activeFilter === 'ALL') return items;
+    return items.filter((item) => item.status === activeFilter);
+  }, [activeFilter, items]);
+
   const groupedByTable = useMemo(() => {
     const groups = new Map<string, { key: string; orderId: number; tableNumber: number; tableName?: string; waiterName: string; items: KitchenQueueItem[] }>();
-    for (const item of items) {
+    for (const item of filteredItems) {
       const key = `${item.orderId}`;
       const current = groups.get(key);
       if (current) {
@@ -128,8 +137,80 @@ export function KitchenPage() {
         });
       }
     }
-    return Array.from(groups.values()).sort((a, b) => a.tableNumber - b.tableNumber);
-  }, [items]);
+    return Array.from(groups.values()).sort((a, b) => {
+      const aOldest = Math.min(...a.items.map((item) => new Date(item.createdAt).getTime()));
+      const bOldest = Math.min(...b.items.map((item) => new Date(item.createdAt).getTime()));
+      if (aOldest !== bOldest) return aOldest - bOldest;
+      return a.tableNumber - b.tableNumber;
+    });
+  }, [filteredItems]);
+
+  const openTableOrders = useMemo(() => {
+    const orderMap = new Map<number, {
+      orderId: number;
+      tableNumber: number;
+      tableName?: string;
+      waiterName: string;
+      pendingCount: number;
+      inProgressCount: number;
+      readyCount: number;
+      totalCount: number;
+      lastActivityAt: number;
+    }>();
+
+    for (const item of items) {
+      const current = orderMap.get(item.orderId) ?? {
+        orderId: item.orderId,
+        tableNumber: item.tableNumber,
+        tableName: item.tableName,
+        waiterName: item.waiterName,
+        pendingCount: 0,
+        inProgressCount: 0,
+        readyCount: 0,
+        totalCount: 0,
+        lastActivityAt: 0,
+      };
+
+      if (item.status === 'PENDING') current.pendingCount += item.quantity;
+      if (item.status === 'IN_PROGRESS') current.inProgressCount += item.quantity;
+      current.totalCount += item.quantity;
+      current.lastActivityAt = Math.max(current.lastActivityAt, new Date(item.createdAt).getTime());
+      orderMap.set(item.orderId, current);
+    }
+
+    for (const item of historyItems) {
+      const current = orderMap.get(item.orderId) ?? {
+        orderId: item.orderId,
+        tableNumber: item.tableNumber,
+        tableName: item.tableName,
+        waiterName: item.waiterName,
+        pendingCount: 0,
+        inProgressCount: 0,
+        readyCount: 0,
+        totalCount: 0,
+        lastActivityAt: 0,
+      };
+
+      current.readyCount += item.quantity;
+      current.totalCount += item.quantity;
+      current.lastActivityAt = Math.max(
+        current.lastActivityAt,
+        new Date(item.readyAt ?? item.createdAt).getTime(),
+      );
+      orderMap.set(item.orderId, current);
+    }
+
+    return Array.from(orderMap.values()).sort((a, b) => {
+      if (a.tableNumber !== b.tableNumber) return a.tableNumber - b.tableNumber;
+      return a.orderId - b.orderId;
+    });
+  }, [historyItems, items]);
+
+  const filterCounts = useMemo(() => ({
+    ALL: items.length,
+    PENDING: items.filter((item) => item.status === 'PENDING').length,
+    IN_PROGRESS: items.filter((item) => item.status === 'IN_PROGRESS').length,
+  }), [items]);
 
   const handleMarkReady = async (orderId: number) => {
     try {
@@ -164,6 +245,53 @@ export function KitchenPage() {
     }
   };
 
+  const handleMarkItemInProgress = async (itemId: number) => {
+    try {
+      setUpdatingItemId(itemId);
+      await ordersApi.updateProductionItemStatus(itemId, 'IN_PROGRESS');
+      await loadQueue(true);
+      if (isHistoryOpen) {
+        await loadHistory(true);
+      }
+      if (selectedOrderId) {
+        await loadOrderDetail(selectedOrderId, true);
+      }
+    } catch (error) {
+      console.error('[Kitchen] Error marcando artículo en preparación:', error);
+      toast.error('No se pudo marcar el artículo en preparación');
+    } finally {
+      setUpdatingItemId(null);
+    }
+  };
+
+  const handleMarkSummaryProductInProgress = async (productName: string) => {
+    const pendingItems = items.filter((item) => item.productName === productName && item.status === 'PENDING');
+    if (pendingItems.length === 0) {
+      toast.error('No hay platos pendientes de ese producto');
+      return;
+    }
+
+    try {
+      setUpdatingItemId(-1);
+      await Promise.all(
+        pendingItems.map((item) => ordersApi.updateProductionItemStatus(item.productionItemId, 'IN_PROGRESS'))
+      );
+      toast.success(`${productName} en marcha`);
+      await loadQueue(true);
+      if (isHistoryOpen) {
+        await loadHistory(true);
+      }
+      if (selectedOrderId) {
+        await loadOrderDetail(selectedOrderId, true);
+      }
+    } catch (error) {
+      console.error('[Kitchen] Error marcando acumulado en preparación:', error);
+      toast.error('No se pudo poner el acumulado en marcha');
+    } finally {
+      setUpdatingItemId(null);
+    }
+  };
+
   const handleRevertItem = async (itemId: number) => {
     try {
       await ordersApi.updateProductionItemStatus(itemId, 'PENDING');
@@ -187,40 +315,21 @@ export function KitchenPage() {
 
   return (
     <main className="kitchen-page">
-      <style>{`
-        @keyframes slideRight {
-          from { transform: translateX(-100%); }
-          to { transform: translateX(0); }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-      `}</style>
-
       <div className="kitchen-page__header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="kitchen-menu-button"
             onClick={() => {
               setIsHistoryOpen(true);
               void loadHistory();
             }}
-            style={{
-              width: 44,
-              height: 44,
-              padding: 0,
-              fontSize: '1.4rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)',
-            }}
-            title="Ver Historial"
+            title="Ver mesas abiertas"
+            aria-label="Ver mesas abiertas"
           >
-            ☰
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
           </button>
           <div>
             <h1 className="admin-page-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
@@ -252,6 +361,33 @@ export function KitchenPage() {
         </div>
       </div>
 
+      <div className="kitchen-filters">
+        <button
+          type="button"
+          className={`kitchen-filter-chip ${activeFilter === 'ALL' ? 'active' : ''}`}
+          onClick={() => setActiveFilter('ALL')}
+        >
+          Todas
+          <span>{filterCounts.ALL}</span>
+        </button>
+        <button
+          type="button"
+          className={`kitchen-filter-chip ${activeFilter === 'PENDING' ? 'active' : ''}`}
+          onClick={() => setActiveFilter('PENDING')}
+        >
+          Pendientes
+          <span>{filterCounts.PENDING}</span>
+        </button>
+        <button
+          type="button"
+          className={`kitchen-filter-chip ${activeFilter === 'IN_PROGRESS' ? 'active' : ''}`}
+          onClick={() => setActiveFilter('IN_PROGRESS')}
+        >
+          En preparación
+          <span>{filterCounts.IN_PROGRESS}</span>
+        </button>
+      </div>
+
       <div className="kitchen-layout">
         <section className="kitchen-summary">
           <h2 className="kitchen-summary__title">Acumulado por producto</h2>
@@ -262,8 +398,20 @@ export function KitchenPage() {
               {summary.map((entry) => (
                 <article key={entry.productName} className="kitchen-summary__item">
                   <div className="kitchen-summary__row">
-                    <strong>{entry.productName}</strong>
-                    <span>{entry.totalQuantity} uds.</span>
+                    <div className="kitchen-summary__product">
+                      <strong>{entry.productName}</strong>
+                    </div>
+                    <div className="kitchen-summary__row-actions">
+                      <span className="kitchen-summary__count">{entry.totalQuantity} uds.</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost kitchen-action-btn kitchen-action-btn--progress"
+                        onClick={() => void handleMarkSummaryProductInProgress(entry.productName)}
+                        disabled={updatingItemId === -1}
+                      >
+                        {updatingItemId === -1 ? '...' : 'En marcha'}
+                      </button>
+                    </div>
                   </div>
                   <div className="kitchen-summary__tables">
                     {entry.tables.map((table) => (
@@ -285,7 +433,10 @@ export function KitchenPage() {
           ) : (
             <div className="kitchen-board__grid">
               {groupedByTable.map((group) => (
-                <article key={group.key} className="kitchen-ticket">
+                <article
+                  key={group.key}
+                  className={`kitchen-ticket ${getTicketUrgencyClass(group.items)}`}
+                >
                   <div className="kitchen-ticket__header">
                     <div
                       onClick={() => {
@@ -301,6 +452,9 @@ export function KitchenPage() {
                       <p>{group.waiterName}{group.items[0]?.stationName ? ` · ${group.items[0].stationName}` : ''}</p>
                     </div>
                     <div className="kitchen-ticket__header-actions">
+                      <span className={`kitchen-ticket__age ${getAgeTone(getOldestMinutes(group.items))}`}>
+                        {formatMinutes(getOldestMinutes(group.items))}
+                      </span>
                       <span className="kitchen-ticket__count">
                         {group.items.reduce((sum, item) => sum + item.quantity, 0)} uds.
                       </span>
@@ -315,20 +469,26 @@ export function KitchenPage() {
                   </div>
                   <div className="kitchen-ticket__items">
                     {group.items.map((item) => (
-                      <div key={item.id} className="kitchen-ticket__item">
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`kitchen-ticket__item kitchen-ticket__item--${item.status.toLowerCase()}`}
+                        onClick={() => setSelectedKitchenItem(item)}
+                      >
                         <div className="kitchen-ticket__item-top">
-                          <strong style={{ fontSize: '0.98rem' }}>{item.quantity}x {item.productName}</strong>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                            {item.courseLabel && (
-                              <span className="kitchen-ticket__course">{item.courseLabel}</span>
-                            )}
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => void handleMarkItemReady(item.productionItemId)}
-                              disabled={updatingItemId === item.productionItemId}
-                            >
-                              {updatingItemId === item.productionItemId ? '...' : 'Listo'}
-                            </button>
+                          <div className="kitchen-ticket__item-main">
+                            <strong className="kitchen-ticket__item-name">{item.quantity}x {item.productName}</strong>
+                          </div>
+                          <div className="kitchen-ticket__item-actions">
+                            <div className="kitchen-ticket__item-badges">
+                              <span className={`kitchen-ticket__status kitchen-ticket__status--${item.status.toLowerCase()}`}>
+                                {item.status === 'PENDING' ? 'Pendiente' : item.status === 'IN_PROGRESS' ? 'En marcha' : 'Listo'}
+                              </span>
+                              {item.courseLabel && (
+                                <span className="kitchen-ticket__course">{item.courseLabel}</span>
+                              )}
+                            </div>
+                            <span className="kitchen-ticket__item-hint">Tocar para acciones</span>
                           </div>
                         </div>
                         {item.sourceMenuName && (
@@ -340,7 +500,7 @@ export function KitchenPage() {
                         {item.notes && (
                           <div className="kitchen-ticket__note">{item.notes}</div>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </article>
@@ -350,105 +510,90 @@ export function KitchenPage() {
         </section>
       </div>
 
-      {/* Drawer del Historial (Menú Lateral Izquierdo Deslizante) */}
+      {/* Panel lateral de mesas abiertas */}
       {isHistoryOpen && (
-        <div
-          className="modal-overlay"
-          onClick={() => setIsHistoryOpen(false)}
-          style={{
-            zIndex: 1100,
-            background: 'rgba(0, 0, 0, 0.4)',
-            animation: 'fadeIn 0.2s ease',
-          }}
-        >
+        <div className="kitchen-drawer-shell">
           <div
             className="kitchen-history-drawer"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              height: '100vh',
-              width: 360,
-              maxWidth: '85vw',
-              background: 'var(--color-surface-1)',
-              borderRight: '1px solid var(--color-border)',
-              boxShadow: '8px 0 32px rgba(0, 0, 0, 0.15)',
-              display: 'flex',
-              flexDirection: 'column',
-              padding: 'var(--space-5)',
-              animation: 'slideRight 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+            <div className="kitchen-history-drawer__header">
               <div>
-                <span className="cart__eyebrow" style={{ fontSize: '0.72rem', letterSpacing: 1 }}>KDS Historial</span>
-                <h3 className="modal__title" style={{ margin: 0, fontSize: '1.25rem' }}>Platos Listos</h3>
+                <span className="cart__eyebrow kitchen-history-drawer__eyebrow">Mesas</span>
+                <h3 className="modal__title kitchen-history-drawer__title">Mesas abiertas</h3>
               </div>
               <button
                 type="button"
                 className="modal-close"
                 onClick={() => setIsHistoryOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '1.6rem', cursor: 'pointer', color: 'var(--color-text-muted)', lineHeight: 1 }}
               >
                 ×
               </button>
             </div>
 
-            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)', lineHeight: 1.4 }}>
-              Historial de platos marcados como listos recientemente. Los platos desaparecen automáticamente al cobrarse la mesa.
+            <p className="kitchen-history-drawer__description">
+              Consulta lo ya marchado de cada mesa mientras su ticket siga abierto.
             </p>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div className="kitchen-history-drawer__body">
               {loadingHistory ? (
-                <div style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>Cargando historial...</div>
-              ) : historyItems.length === 0 ? (
-                <div className="admin-modifier-empty" style={{ textAlign: 'center', padding: 'var(--space-6)' }}>No hay platos listos en mesas activas.</div>
+                <div className="kitchen-history-drawer__empty">Cargando mesas...</div>
+              ) : openTableOrders.length === 0 ? (
+                <div className="admin-modifier-empty kitchen-history-drawer__empty">No hay mesas activas en esta sección.</div>
               ) : (
-                historyItems.map((item) => (
-                  <div
-                    key={item.id}
-                    style={{
-                      background: 'var(--color-surface-2)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: 'var(--space-3) var(--space-4)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 'var(--space-3)',
+                openTableOrders.map((order) => (
+                  <button
+                    key={order.orderId}
+                    type="button"
+                    className="kitchen-history-drawer__table"
+                    onClick={() => {
+                      setSelectedOrderId(order.orderId);
+                      setIsHistoryOpen(false);
+                      void loadOrderDetail(order.orderId);
                     }}
                   >
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
-                        <span>Mesa {item.tableNumber}</span>
-                        {item.readyAt && (
-                          <span style={{ fontWeight: 500, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            {new Date(item.readyAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.92rem', color: 'var(--color-text-primary)', marginTop: 2, fontWeight: 700 }}>
-                        {item.quantity}x {item.productName}
-                      </div>
-                      {item.notes && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginTop: 2 }}>
-                          {item.notes}
+                    <div className="kitchen-history-drawer__table-top">
+                      <div>
+                        <div className="kitchen-history-drawer__table-name">
+                          Mesa {order.tableNumber}{order.tableName ? ` · ${order.tableName}` : ''}
                         </div>
+                        <div className="kitchen-history-drawer__table-meta">
+                          {order.waiterName}
+                        </div>
+                      </div>
+                      <div className="kitchen-history-drawer__table-total">
+                        {order.totalCount} uds.
+                      </div>
+                    </div>
+
+                    <div className="kitchen-history-drawer__table-badges">
+                      {order.pendingCount > 0 && (
+                        <span className="kitchen-history-drawer__badge kitchen-history-drawer__badge--pending">
+                          Pendiente {order.pendingCount}
+                        </span>
+                      )}
+                      {order.inProgressCount > 0 && (
+                        <span className="kitchen-history-drawer__badge kitchen-history-drawer__badge--progress">
+                          Marcha {order.inProgressCount}
+                        </span>
+                      )}
+                      {order.readyCount > 0 && (
+                        <span className="kitchen-history-drawer__badge kitchen-history-drawer__badge--ready">
+                          Listo {order.readyCount}
+                        </span>
                       )}
                     </div>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => void handleRevertItem(item.productionItemId)}
-                      style={{ fontSize: '0.8rem', padding: '6px 10px', height: 'fit-content' }}
-                    >
-                      Recuperar
-                    </button>
-                  </div>
+                  </button>
                 ))
               )}
             </div>
           </div>
+          <button
+            type="button"
+            className="kitchen-drawer-shell__scrim"
+            aria-label="Cerrar menú de mesas"
+            onClick={() => setIsHistoryOpen(false)}
+          />
         </div>
       )}
 
@@ -533,19 +678,35 @@ export function KitchenPage() {
                               </button>
                             </>
                           ) : (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={async () => {
-                                await handleMarkItemReady(item.productionItemId);
-                                // Refrescar detalles del modal
-                                await loadOrderDetail(selectedOrderId, true);
-                              }}
-                              disabled={updatingItemId === item.productionItemId}
-                              style={{ fontSize: '0.78rem', padding: '5px 10px', fontWeight: 700 }}
-                            >
-                              {updatingItemId === item.productionItemId ? '...' : 'Listo'}
-                            </button>
+                            <>
+                              {item.status !== 'IN_PROGRESS' && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost kitchen-action-btn kitchen-action-btn--progress"
+                                  onClick={async () => {
+                                    await handleMarkItemInProgress(item.productionItemId);
+                                    await loadOrderDetail(selectedOrderId, true);
+                                  }}
+                                  disabled={updatingItemId === item.productionItemId}
+                                  style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                                >
+                                  {updatingItemId === item.productionItemId ? '...' : 'Marcha'}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-secondary kitchen-action-btn kitchen-action-btn--ready"
+                                onClick={async () => {
+                                  await handleMarkItemReady(item.productionItemId);
+                                  // Refrescar detalles del modal
+                                  await loadOrderDetail(selectedOrderId, true);
+                                }}
+                                disabled={updatingItemId === item.productionItemId}
+                                style={{ fontSize: '0.78rem', padding: '5px 10px', fontWeight: 700 }}
+                              >
+                                {updatingItemId === item.productionItemId ? '...' : 'Listo'}
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -567,6 +728,77 @@ export function KitchenPage() {
           </div>
         </div>
       )}
+
+      {selectedKitchenItem && (
+        <div className="modal-overlay" onClick={() => setSelectedKitchenItem(null)} style={{ zIndex: 1120 }}>
+          <div className="modal kitchen-item-action-modal" onClick={(event) => event.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+              <div>
+                <span className="cart__eyebrow">Acciones</span>
+                <h3 className="modal__title" style={{ margin: '4px 0 0' }}>
+                  {selectedKitchenItem.quantity}x {selectedKitchenItem.productName}
+                </h3>
+                <p style={{ margin: '8px 0 0', color: 'var(--color-text-muted)', fontSize: '0.84rem' }}>
+                  Mesa {selectedKitchenItem.tableNumber}{selectedKitchenItem.tableName ? ` · ${selectedKitchenItem.tableName}` : ''}
+                </p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setSelectedKitchenItem(null)}>×</button>
+            </div>
+
+            <div className="kitchen-item-action-modal__actions">
+              {selectedKitchenItem.status !== 'IN_PROGRESS' && (
+                <button
+                  type="button"
+                  className="btn btn-ghost kitchen-action-btn kitchen-action-btn--progress"
+                  onClick={async () => {
+                    await handleMarkItemInProgress(selectedKitchenItem.productionItemId);
+                    setSelectedKitchenItem(null);
+                  }}
+                  disabled={updatingItemId === selectedKitchenItem.productionItemId}
+                >
+                  {updatingItemId === selectedKitchenItem.productionItemId ? '...' : 'En marcha'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary kitchen-action-btn kitchen-action-btn--ready"
+                onClick={async () => {
+                  await handleMarkItemReady(selectedKitchenItem.productionItemId);
+                  setSelectedKitchenItem(null);
+                }}
+                disabled={updatingItemId === selectedKitchenItem.productionItemId}
+              >
+                {updatingItemId === selectedKitchenItem.productionItemId ? '...' : 'Listo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+function getOldestMinutes(items: KitchenQueueItem[]) {
+  const oldest = Math.min(...items.map((item) => new Date(item.createdAt).getTime()));
+  return Math.max(0, Math.round((Date.now() - oldest) / 60000));
+}
+
+function formatMinutes(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} h ${rest} min`;
+}
+
+function getAgeTone(minutes: number) {
+  if (minutes >= 20) return 'kitchen-ticket__age--alert';
+  if (minutes >= 10) return 'kitchen-ticket__age--warning';
+  return 'kitchen-ticket__age--normal';
+}
+
+function getTicketUrgencyClass(items: KitchenQueueItem[]) {
+  const minutes = getOldestMinutes(items);
+  if (minutes >= 20) return 'kitchen-ticket--alert';
+  if (minutes >= 10) return 'kitchen-ticket--warning';
+  return '';
 }

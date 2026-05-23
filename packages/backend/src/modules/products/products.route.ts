@@ -5,6 +5,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
 import { buildCommandaPreviewText, buildTicketPreviewText, ESCPOS, sendToPrinter } from '../printing/printer.service';
+import { requirePermission } from '../auth/guards';
 
 export async function productsRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -60,6 +61,7 @@ export async function printersRoutes(fastify: FastifyInstance) {
   /** POST /api/printers/open-drawer — Abre el cajon de la impresora principal */
   fastify.post('/open-drawer', async (request, reply) => {
     const body = OpenDrawerSchema.parse(request.body);
+    if (!requirePermission(request, reply, 'OPEN_DRAWER')) return;
 
     const receiptPrinter = await prisma.printer.findFirst({
       where: {
@@ -93,6 +95,7 @@ export async function printersRoutes(fastify: FastifyInstance) {
   fastify.get<{ Querystring: { venueId?: string } }>('/preview-samples', async (request, reply) => {
     const venueId = parseInt(request.query.venueId ?? '0', 10);
     if (!venueId) return reply.status(400).send({ error: 'venueId requerido' });
+    if (!requirePermission(request, reply, 'MANAGE_PRINTERS')) return;
 
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },

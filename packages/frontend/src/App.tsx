@@ -18,8 +18,10 @@ import { UsersAdminPage } from './pages/admin/UsersAdminPage';
 import { TablesAdminPage } from './pages/admin/TablesAdminPage';
 import { PrintersAdminPage } from './pages/admin/PrintersAdminPage';
 import { TicketsLogPage } from './pages/admin/TicketsLogPage';
+import { LicensingPage } from './pages/admin/LicensingPage';
 import { useAppStore } from './store/useAppStore';
 import { countPendingOrders } from './services/offlineStorage';
+import { licensingApi } from './services/api';
 
 // ── PROTECCIÓN DE RUTAS ──────────────────────────────────────────────────────
 
@@ -55,7 +57,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 // ── NAVBAR PRINCIPAL ─────────────────────────────────────────────────────────
 
 function Navbar() {
-  const { setIsOnline, pendingOrdersCount, setPendingOrdersCount, currentUser, currentVenue, logout } = useAppStore();
+  const { setIsOnline, pendingOrdersCount, setPendingOrdersCount, currentUser, currentVenue, logout, licenseStatus, setLicenseStatus } = useAppStore();
   const location = useLocation();
   const isPOS = location.pathname.startsWith('/pos/');
   const isAdmin = location.pathname.startsWith('/admin');
@@ -80,6 +82,22 @@ function Navbar() {
     const interval = setInterval(update, 10_000);
     return () => clearInterval(interval);
   }, [setPendingOrdersCount]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const update = async () => {
+      try {
+        setLicenseStatus(await licensingApi.getStatus());
+      } catch {
+        // El backend ya decide si la sede entra en gracia o solo consulta.
+      }
+    };
+
+    void update();
+    const interval = setInterval(update, 60_000);
+    return () => clearInterval(interval);
+  }, [currentUser, setLicenseStatus]);
 
   // No renderizar Navbar en Login o Selector de sede
   if (location.pathname === '/login' || location.pathname === '/select-venue') {
@@ -152,6 +170,12 @@ function Navbar() {
           </span>
         )}
 
+        {licenseStatus && licenseStatus.effectiveState !== 'ACTIVE' && (
+          <span className={`license-pill license-pill--${licenseStatus.effectiveState.toLowerCase()}`}>
+            {licenseStatus.effectiveState === 'GRACE' ? 'Licencia en gracia' : 'Licencia bloqueada'}
+          </span>
+        )}
+
         {currentUser && !isAdmin && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginLeft: 'var(--space-2)', borderLeft: '1px solid var(--color-border)', paddingLeft: 'var(--space-3)' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{currentUser.name}</span>
@@ -165,12 +189,44 @@ function Navbar() {
   );
 }
 
+function LicenseOverlay() {
+  const location = useLocation();
+  const { currentUser, licenseStatus } = useAppStore();
+
+  if (!licenseStatus || licenseStatus.effectiveState !== 'BLOCKED') {
+    return null;
+  }
+
+  if (location.pathname.startsWith('/admin/licensing') || location.pathname.startsWith('/admin/license-center')) {
+    return null;
+  }
+
+  return (
+    <div className="license-overlay">
+      <div className="license-overlay__card">
+        <h2>Licencia bloqueada</h2>
+        <p>{licenseStatus.reason}</p>
+        {currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') ? (
+          <NavLink to="/admin/licensing" className="btn btn-primary">
+            Ir a licencias
+          </NavLink>
+        ) : (
+          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+            Contacta con el administrador para reactivar el servicio.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── CONFIGURACIÓN DEL ROUTER PRINCIPAL ───────────────────────────────────────
 
 export default function App() {
   return (
     <BrowserRouter>
       <Navbar />
+      <LicenseOverlay />
       <Routes>
         {/* Rutas Públicas */}
         <Route path="/login" element={<LoginPage />} />
@@ -216,6 +272,7 @@ export default function App() {
           <Route path="venues/:id/printers" element={<PrintersAdminPage />} />
           <Route path="products" element={<ProductsAdminPage />} />
           <Route path="users" element={<UsersAdminPage />} />
+          <Route path="licensing" element={<LicensingPage />} />
           <Route path="tickets" element={<TicketsLogPage />} />
         </Route>
       </Routes>

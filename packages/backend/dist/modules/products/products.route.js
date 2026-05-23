@@ -5,6 +5,7 @@ exports.printersRoutes = printersRoutes;
 const zod_1 = require("zod");
 const client_1 = require("../../db/client");
 const printer_service_1 = require("../printing/printer.service");
+const guards_1 = require("../auth/guards");
 async function productsRoutes(fastify) {
     fastify.addHook('onRequest', fastify.authenticate);
     /** GET /api/products?venueId= — Catálogo completo por categorías */
@@ -54,6 +55,8 @@ async function printersRoutes(fastify) {
     /** POST /api/printers/open-drawer — Abre el cajon de la impresora principal */
     fastify.post('/open-drawer', async (request, reply) => {
         const body = OpenDrawerSchema.parse(request.body);
+        if (!(0, guards_1.requirePermission)(request, reply, 'OPEN_DRAWER'))
+            return;
         const receiptPrinter = await client_1.prisma.printer.findFirst({
             where: {
                 venueId: body.venueId,
@@ -82,6 +85,8 @@ async function printersRoutes(fastify) {
         const venueId = parseInt(request.query.venueId ?? '0', 10);
         if (!venueId)
             return reply.status(400).send({ error: 'venueId requerido' });
+        if (!(0, guards_1.requirePermission)(request, reply, 'MANAGE_PRINTERS'))
+            return;
         const venue = await client_1.prisma.venue.findUnique({
             where: { id: venueId },
             include: { organisation: true },

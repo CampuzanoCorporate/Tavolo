@@ -4,6 +4,7 @@ exports.ticketsRoutes = ticketsRoutes;
 const zod_1 = require("zod");
 const client_1 = require("../../db/client");
 const tickets_service_1 = require("./tickets.service");
+const guards_1 = require("../auth/guards");
 const CloseTicketSchema = zod_1.z.object({
     orderId: zod_1.z.number().int().positive(),
     venueId: zod_1.z.number().int().positive(),
@@ -26,11 +27,20 @@ const ClosePartialTicketSchema = zod_1.z.object({
 });
 const CloseCashSchema = zod_1.z.object({
     venueId: zod_1.z.number().int().positive(),
+    countedAmount: zod_1.z.coerce.number().min(0),
     notes: zod_1.z.string().trim().max(500).optional(),
 });
-function canAccessVenue(request, venueId) {
-    return request.user.role === 'ADMIN' || request.user.venueIds.includes(venueId);
-}
+const OpenCashSchema = zod_1.z.object({
+    venueId: zod_1.z.number().int().positive(),
+    openingAmount: zod_1.z.coerce.number().min(0),
+    notes: zod_1.z.string().trim().max(500).optional(),
+});
+const CashMovementSchema = zod_1.z.object({
+    venueId: zod_1.z.number().int().positive(),
+    type: zod_1.z.enum(['CASH_IN', 'CASH_OUT']),
+    amount: zod_1.z.coerce.number().positive(),
+    description: zod_1.z.string().trim().min(2).max(500),
+});
 async function ticketsRoutes(fastify) {
     fastify.addHook('onRequest', fastify.authenticate);
     /** POST /api/tickets/close */
@@ -60,19 +70,53 @@ async function ticketsRoutes(fastify) {
         const venueId = parseInt(request.query.venueId ?? '0', 10);
         if (!venueId)
             return reply.status(400).send({ error: 'venueId requerido' });
-        if (!canAccessVenue(request, venueId))
+        if (!(0, guards_1.canAccessVenue)(request, venueId))
             return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        if (!(0, guards_1.requirePermission)(request, reply, 'VIEW_FINANCIALS'))
+            return;
         const summary = await (0, tickets_service_1.getCashSummary)(venueId);
         return reply.send({ data: summary });
     });
     /** POST /api/tickets/cash/close */
+    fastify.post('/cash/open', async (request, reply) => {
+        const body = OpenCashSchema.parse(request.body);
+        if (!(0, guards_1.canAccessVenue)(request, body.venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        if (!(0, guards_1.requirePermission)(request, reply, 'CLOSE_CASH'))
+            return;
+        const session = await (0, tickets_service_1.openCashSession)({
+            venueId: body.venueId,
+            userId: request.user.userId,
+            openingAmount: body.openingAmount,
+            notes: body.notes,
+        });
+        return reply.status(201).send({ data: session });
+    });
+    fastify.post('/cash/movements', async (request, reply) => {
+        const body = CashMovementSchema.parse(request.body);
+        if (!(0, guards_1.canAccessVenue)(request, body.venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        if (!(0, guards_1.requirePermission)(request, reply, 'CLOSE_CASH'))
+            return;
+        const movement = await (0, tickets_service_1.addCashMovement)({
+            venueId: body.venueId,
+            userId: request.user.userId,
+            type: body.type,
+            amount: body.amount,
+            description: body.description,
+        });
+        return reply.status(201).send({ data: movement });
+    });
     fastify.post('/cash/close', async (request, reply) => {
         const body = CloseCashSchema.parse(request.body);
-        if (!canAccessVenue(request, body.venueId))
+        if (!(0, guards_1.canAccessVenue)(request, body.venueId))
             return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        if (!(0, guards_1.requirePermission)(request, reply, 'CLOSE_CASH'))
+            return;
         const closure = await (0, tickets_service_1.closeCashRegister)({
             venueId: body.venueId,
             userId: request.user.userId,
+            countedAmount: body.countedAmount,
             notes: body.notes,
         });
         return reply.status(201).send({ data: closure });
@@ -84,6 +128,8 @@ async function ticketsRoutes(fastify) {
     });
     /** POST /api/tickets/:id/reprint */
     fastify.post('/:id/reprint', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'REPRINT_TICKETS'))
+            return;
         const data = await (0, tickets_service_1.reprintTicket)(parseInt(request.params.id, 10));
         return reply.send({ data });
     });

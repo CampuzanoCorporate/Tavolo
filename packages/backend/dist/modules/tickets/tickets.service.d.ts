@@ -23,16 +23,58 @@ export interface CloseTicketResult {
     qrBase64?: string;
 }
 export interface CashSummaryResult {
+    activeSession: {
+        id: number;
+        status: 'OPEN' | 'CLOSED';
+        openedAt: Date;
+        openingAmount: number;
+        openingNotes?: string | null;
+        openedBy: {
+            id: number;
+            name: string;
+        };
+    } | null;
     periodStart: Date;
     periodEnd: Date;
     ticketCount: number;
     billedTotal: number;
+    openingAmount: number;
+    manualInTotal: number;
+    manualOutTotal: number;
+    expectedAmount: number;
     tickets: Array<{
         id: number;
         invoiceCode: string;
         issuedAt: Date;
         total: Prisma.Decimal;
     }>;
+    movements: Array<{
+        id: number;
+        type: 'OPENING' | 'CASH_IN' | 'CASH_OUT' | 'TICKET';
+        amount: number;
+        description?: string | null;
+        createdAt: Date;
+        user: {
+            id: number;
+            name: string;
+        };
+        ticket?: {
+            id: number;
+            invoiceCode: string;
+        } | null;
+    }>;
+}
+export interface CashSessionResult {
+    id: number;
+    venueId: number;
+    openedAt: Date;
+    openingAmount: Prisma.Decimal;
+    openingNotes: string | null;
+    status: 'OPEN' | 'CLOSED';
+    openedByUser: {
+        id: number;
+        name: string;
+    };
 }
 export declare function closeTicket(input: CloseTicketInput): Promise<CloseTicketResult>;
 export interface ClosePartialTicketInput {
@@ -59,6 +101,7 @@ export declare function getTicketPreview(ticketId: number): Promise<{
                 email: string;
                 name: string;
                 role: import(".prisma/client").$Enums.Role;
+                permissions: string[];
                 password: string;
                 organisationId: number;
                 isActive: boolean;
@@ -145,9 +188,38 @@ export declare function reprintTicket(ticketId: number): Promise<{
     success: boolean;
 }>;
 export declare function getCashSummary(venueId: number): Promise<CashSummaryResult>;
+export declare function openCashSession(input: {
+    venueId: number;
+    userId: number;
+    openingAmount: number;
+    notes?: string;
+}): Promise<CashSessionResult>;
+export declare function addCashMovement(input: {
+    venueId: number;
+    userId: number;
+    type: 'CASH_IN' | 'CASH_OUT';
+    amount: number;
+    description: string;
+}): Promise<{
+    user: {
+        id: number;
+        name: string;
+    };
+} & {
+    id: number;
+    createdAt: Date;
+    userId: number;
+    venueId: number;
+    type: import(".prisma/client").$Enums.CashMovementType;
+    description: string | null;
+    ticketId: number | null;
+    sessionId: number;
+    amount: Prisma.Decimal;
+}>;
 export declare function closeCashRegister(input: {
     venueId: number;
     userId: number;
+    countedAmount: number;
     notes?: string;
 }): Promise<{
     user: {
@@ -160,9 +232,16 @@ export declare function closeCashRegister(input: {
     userId: number;
     venueId: number;
     notes: string | null;
+    sessionId: number | null;
     periodStart: Date;
     periodEnd: Date;
     ticketCount: number;
     billedTotal: Prisma.Decimal;
+    openingAmount: Prisma.Decimal;
+    manualInTotal: Prisma.Decimal;
+    manualOutTotal: Prisma.Decimal;
+    expectedAmount: Prisma.Decimal;
+    countedAmount: Prisma.Decimal;
+    discrepancyAmount: Prisma.Decimal;
 }>;
 //# sourceMappingURL=tickets.service.d.ts.map

@@ -29,6 +29,7 @@ export declare function getUserProfile(userId: number): Promise<{
     email: string;
     name: string;
     role: import(".prisma/client").$Enums.Role;
+    permissions: string[];
     isActive: boolean;
     createdAt: Date;
     venueUsers: ({

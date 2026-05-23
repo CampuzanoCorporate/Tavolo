@@ -15,6 +15,23 @@ export type ProductType = 'NORMAL' | 'MENU';
 export type MenuCourseTag = 'FIRST' | 'SECOND' | 'DESSERT' | 'COFFEE';
 export type MenuFinalMode = 'DESSERT_ONLY' | 'DESSERT_OR_COFFEE' | 'DESSERT_AND_COFFEE';
 export type ProductionItemStatus = 'PENDING' | 'IN_PROGRESS' | 'READY';
+export type LicenseStatus = 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
+export type EffectiveLicenseState = 'ACTIVE' | 'GRACE' | 'BLOCKED' | 'UNLICENSED';
+export type AppPermission =
+  | 'VIEW_OWNER_DASHBOARD'
+  | 'VIEW_FINANCIALS'
+  | 'MANAGE_VENUES'
+  | 'MANAGE_TABLES'
+  | 'MANAGE_PRINTERS'
+  | 'MANAGE_CATALOG'
+  | 'MANAGE_USERS'
+  | 'CLOSE_CASH'
+  | 'OPEN_DRAWER'
+  | 'SEND_KITCHEN_NOTE'
+  | 'MERGE_TABLES'
+  | 'EDIT_OPEN_ORDERS'
+  | 'CANCEL_SENT_ITEMS'
+  | 'REPRINT_TICKETS';
 
 export interface Organisation {
   id: number;
@@ -41,13 +58,57 @@ export interface Venue {
   invoiceSeries: string;
 }
 
+export interface LicenseRecord {
+  id: number;
+  organisationId?: number | null;
+  code: string;
+  label?: string | null;
+  status: LicenseStatus;
+  validFrom: string;
+  validUntil: string;
+  graceDays: number;
+  graceUntil: string;
+  activatedAt?: string | null;
+  lastValidatedAt?: string | null;
+  lastSeenAt?: string | null;
+  notes?: string | null;
+  organisation?: { id: number; name: string; nif: string } | null;
+}
+
+export interface LicenseStatusData {
+  effectiveState: EffectiveLicenseState;
+  canWrite: boolean;
+  reason: string;
+  license: LicenseRecord | null;
+}
+
 export interface AuthUser {
   id: number;
   name: string;
   email: string;
   role: Role;
+  permissions: AppPermission[];
   organisation: { id: number; name: string; nif: string };
   venueUsers: Array<{ venue: Venue }>;
+}
+
+export interface OwnerDashboardMetrics {
+  today: {
+    billedTotal: number;
+    ticketCount: number;
+    avgTicket: number;
+  };
+  month: {
+    billedTotal: number;
+    ticketCount: number;
+  };
+  organisation: {
+    billedTotal: number;
+    venueCount: number;
+  };
+  hourlySales: Array<{ hour: number; total: number }>;
+  venueTotals: Array<{ venueId: number; venueName: string; ticketCount: number; billedTotal: number }>;
+  topProducts: Array<{ productName: string; quantity: number; revenue: number }>;
 }
 
 export interface AuthResponse {
@@ -236,19 +297,58 @@ export interface CashSummaryTicket {
 }
 
 export interface CashSummaryData {
+  activeSession: {
+    id: number;
+    status: 'OPEN' | 'CLOSED';
+    openedAt: string;
+    openingAmount: number;
+    openingNotes?: string | null;
+    openedBy: {
+      id: number;
+      name: string;
+    };
+  } | null;
   periodStart: string;
   periodEnd: string;
   ticketCount: number;
   billedTotal: number;
+  openingAmount: number;
+  manualInTotal: number;
+  manualOutTotal: number;
+  expectedAmount: number;
   tickets: CashSummaryTicket[];
+  movements: CashMovement[];
+}
+
+export interface CashMovement {
+  id: number;
+  type: 'OPENING' | 'CASH_IN' | 'CASH_OUT' | 'TICKET';
+  amount: number;
+  description?: string | null;
+  createdAt: string;
+  user: {
+    id: number;
+    name: string;
+  };
+  ticket?: {
+    id: number;
+    invoiceCode: string;
+  } | null;
 }
 
 export interface CashClosure {
   id: number;
+  sessionId?: number | null;
   periodStart: string;
   periodEnd: string;
   ticketCount: number;
   billedTotal: number | string;
+  openingAmount: number | string;
+  manualInTotal: number | string;
+  manualOutTotal: number | string;
+  expectedAmount: number | string;
+  countedAmount: number | string;
+  discrepancyAmount: number | string;
   notes?: string | null;
   createdAt: string;
   user: {

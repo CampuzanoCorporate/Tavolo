@@ -3,6 +3,7 @@
  */
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import toast from 'react-hot-toast';
 import { authApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
@@ -34,8 +35,12 @@ export function LoginPage() {
       } else {
         navigate('/select-venue');
       }
-    } catch {
-      toast.error('Email o contraseña incorrectos');
+    } catch (error) {
+      const apiMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || error.response?.data?.error
+        : null;
+
+      toast.error(apiMessage || 'Email o contraseña incorrectos');
       emailRef.current?.focus();
     } finally {
       setLoading(false);

@@ -5,6 +5,7 @@ import { FastifyInstance } from 'fastify';
 import { prisma } from '../../db/client';
 import { OrderStatus, TableStatus } from '@prisma/client';
 import { z } from 'zod';
+import { requirePermission } from '../auth/guards';
 
 const MergeTablesSchema = z.object({
   venueId: z.number().int().positive(),
@@ -54,6 +55,7 @@ export async function tablesRoutes(fastify: FastifyInstance) {
 
   /** POST /api/tables/merge — Unir mesas activas en una mesa destino */
   fastify.post('/merge', async (request, reply) => {
+    if (!requirePermission(request, reply, 'MERGE_TABLES')) return;
     const body = MergeTablesSchema.parse(request.body);
     const sourceTableIds = Array.from(new Set(body.sourceTableIds.filter((id) => id !== body.targetTableId)));
 

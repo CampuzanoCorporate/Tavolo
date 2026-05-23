@@ -1,0 +1,126 @@
+import type { License, LicenseStatus } from '@prisma/client';
+export type EffectiveLicenseState = 'ACTIVE' | 'GRACE' | 'BLOCKED' | 'UNLICENSED';
+export interface LicenseEvaluation {
+    effectiveState: EffectiveLicenseState;
+    canWrite: boolean;
+    reason: string;
+    license: License | null;
+}
+export declare function buildLicenseDates(validityDays?: number, graceDays?: number): {
+    validFrom: Date;
+    validUntil: Date;
+    graceUntil: Date;
+};
+export declare function generateLicenseCode(): string;
+export declare function evaluateLicense(license: License | null, now?: Date): LicenseEvaluation;
+export declare function getCurrentOrganisationLicense(organisationId: number): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+} | null>;
+export declare function getOrganisationLicenseStatus(organisationId: number): Promise<LicenseEvaluation>;
+export declare function touchOrganisationLicense(organisationId: number): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+} | null>;
+export declare function generateLicense(params: {
+    organisationId?: number;
+    label?: string;
+    status?: LicenseStatus;
+    validityDays?: number;
+    graceDays?: number;
+    notes?: string;
+}): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+}>;
+export declare function activateLicenseForOrganisation(code: string, organisationId: number): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+}>;
+export declare function refreshLicense(id: number, validityDays?: number): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+}>;
+export declare function updateLicenseStatus(id: number, status: LicenseStatus): Promise<{
+    id: number;
+    organisationId: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+    code: string;
+    status: import(".prisma/client").$Enums.LicenseStatus;
+    notes: string | null;
+    label: string | null;
+    validFrom: Date;
+    validUntil: Date;
+    graceDays: number;
+    graceUntil: Date;
+    activatedAt: Date | null;
+    lastValidatedAt: Date | null;
+    lastSeenAt: Date | null;
+}>;
+//# sourceMappingURL=licensing.service.d.ts.map

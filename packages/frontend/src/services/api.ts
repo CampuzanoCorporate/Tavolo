@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
@@ -111,7 +111,11 @@ export const ticketsApi = {
     apiClient.post(`/api/tickets/${ticketId}/reprint`).then((r) => r.data.data),
   getCashSummary: (venueId: number) =>
     apiClient.get<{ data: CashSummaryData }>('/api/tickets/cash/summary', { params: { venueId } }).then((r) => r.data.data),
-  closeCash: (data: { venueId: number; notes?: string }) =>
+  openCash: (data: { venueId: number; openingAmount: number; notes?: string }) =>
+    apiClient.post('/api/tickets/cash/open', data).then((r) => r.data.data),
+  addCashMovement: (data: { venueId: number; type: 'CASH_IN' | 'CASH_OUT'; amount: number; description: string }) =>
+    apiClient.post('/api/tickets/cash/movements', data).then((r) => r.data.data),
+  closeCash: (data: { venueId: number; countedAmount: number; notes?: string }) =>
     apiClient.post('/api/tickets/cash/close', data).then((r) => r.data.data),
 };
 
@@ -120,6 +124,7 @@ export const adminApi = {
   // Organización
   getOrg:        () => apiClient.get<{ data: Organisation & { venues: Venue[] } }>('/api/admin/organisation').then((r) => r.data.data),
   updateOrg:     (data: Partial<Organisation>) => apiClient.put('/api/admin/organisation', data).then((r) => r.data.data),
+  getOwnerMetrics: () => apiClient.get<{ data: OwnerDashboardMetrics }>('/api/admin/dashboard/owner-metrics').then((r) => r.data.data),
 
   // Sedes
   getVenues:     () => apiClient.get<{ data: Venue[] }>('/api/admin/venues').then((r) => r.data.data),
@@ -179,4 +184,29 @@ export const printersApi = {
     apiClient.post('/api/printers/open-drawer', { venueId }).then((r) => r.data),
   getPreviewSamples: (venueId: number) =>
     apiClient.get('/api/printers/preview-samples', { params: { venueId } }).then((r) => r.data.data),
+};
+
+export const licensingApi = {
+  getStatus: () =>
+    apiClient.get<{ data: LicenseStatusData }>('/api/licensing/status').then((r) => r.data.data),
+  getCurrent: () =>
+    apiClient.get<{ data: LicenseStatusData }>('/api/licensing/current').then((r) => r.data.data),
+  activate: (code: string) =>
+    apiClient.post<{ data: LicenseStatusData }>('/api/licensing/activate', { code }).then((r) => r.data.data),
+  getLicenseCenterList: (masterKey: string) =>
+    apiClient.get<{ data: LicenseRecord[] }>('/api/licensing/center/licenses', {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  generateLicense: (masterKey: string, data: { organisationId?: number; label?: string; validityDays?: number; graceDays?: number; notes?: string }) =>
+    apiClient.post<{ data: LicenseRecord }>('/api/licensing/center/licenses/generate', data, {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  refreshLicense: (masterKey: string, id: number, validityDays?: number) =>
+    apiClient.post<{ data: LicenseRecord }>(`/api/licensing/center/licenses/${id}/refresh`, { validityDays }, {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  updateLicenseStatus: (masterKey: string, id: number, status: LicenseStatus) =>
+    apiClient.patch<{ data: LicenseRecord }>(`/api/licensing/center/licenses/${id}/status`, { status }, {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
 };

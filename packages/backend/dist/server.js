@@ -21,6 +21,8 @@ const tables_route_1 = require("./modules/tables/tables.route");
 const products_route_1 = require("./modules/products/products.route");
 const admin_route_1 = require("./modules/admin/admin.route");
 const client_1 = require("./db/client");
+const licensing_route_1 = require("./modules/licensing/licensing.route");
+const licensing_service_1 = require("./modules/licensing/licensing.service");
 async function bootstrap() {
     const app = (0, fastify_1.default)({
         logger: { level: config_1.config.server.isDev ? 'debug' : 'warn' },
@@ -48,6 +50,37 @@ async function bootstrap() {
     });
     // ── Error handler ─────────────────────────────────────────────────────────
     app.setErrorHandler((0, errorHandler_1.buildErrorHandler)());
+    app.addHook('preHandler', async (request, reply) => {
+        const path = request.routerPath ?? request.url;
+        const method = request.method.toUpperCase();
+        const skipPaths = [
+            '/health',
+            '/api/auth/login',
+            '/api/licensing/status',
+            '/api/licensing/current',
+            '/api/licensing/activate',
+        ];
+        if (skipPaths.some((prefix) => path.startsWith(prefix)) || path.startsWith('/api/licensing/center/')) {
+            return;
+        }
+        if (!request.user?.organisationId) {
+            return;
+        }
+        const license = await (0, licensing_service_1.getOrganisationLicenseStatus)(request.user.organisationId);
+        reply.header('x-license-state', license.effectiveState);
+        if (!license.canWrite && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            return reply.status(403).send({
+                statusCode: 403,
+                code: 'LICENSE_BLOCKED',
+                message: license.reason,
+                license: {
+                    effectiveState: license.effectiveState,
+                    validUntil: license.license?.validUntil ?? null,
+                    graceUntil: license.license?.graceUntil ?? null,
+                },
+            });
+        }
+    });
     // ── Health check ──────────────────────────────────────────────────────────
     app.get('/health', async () => ({
         status: 'ok',
@@ -62,6 +95,7 @@ async function bootstrap() {
     await app.register(products_route_1.productsRoutes, { prefix: '/api/products' });
     await app.register(products_route_1.printersRoutes, { prefix: '/api/printers' });
     await app.register(admin_route_1.adminRoutes, { prefix: '/api/admin' });
+    await app.register(licensing_route_1.licensingRoutes, { prefix: '/api/licensing' });
     // ── Arrancar servidor ─────────────────────────────────────────────────────
     try {
         await app.listen({ port: config_1.config.server.port, host: '0.0.0.0' });

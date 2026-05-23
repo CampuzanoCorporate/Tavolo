@@ -4,7 +4,24 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { adminApi } from '../../services/api';
-import type { Venue } from '../../types';
+import type { AppPermission, Venue } from '../../types';
+
+const PERMISSION_OPTIONS: Array<{ value: AppPermission; label: string }> = [
+  { value: 'VIEW_OWNER_DASHBOARD', label: 'Panel del dueño' },
+  { value: 'VIEW_FINANCIALS', label: 'Ver financieros' },
+  { value: 'MANAGE_VENUES', label: 'Gestionar sedes' },
+  { value: 'MANAGE_TABLES', label: 'Gestionar mesas' },
+  { value: 'MANAGE_PRINTERS', label: 'Gestionar impresoras' },
+  { value: 'MANAGE_CATALOG', label: 'Gestionar catálogo' },
+  { value: 'MANAGE_USERS', label: 'Gestionar usuarios' },
+  { value: 'CLOSE_CASH', label: 'Cerrar caja' },
+  { value: 'OPEN_DRAWER', label: 'Abrir cajón' },
+  { value: 'SEND_KITCHEN_NOTE', label: 'Avisar a cocina' },
+  { value: 'MERGE_TABLES', label: 'Unir mesas' },
+  { value: 'EDIT_OPEN_ORDERS', label: 'Editar pedidos abiertos' },
+  { value: 'CANCEL_SENT_ITEMS', label: 'Cancelar líneas enviadas' },
+  { value: 'REPRINT_TICKETS', label: 'Reimprimir tickets' },
+];
 
 interface VenueUserRelation {
   venueId: number;
@@ -20,6 +37,7 @@ interface UserListItem {
   name: string;
   email: string;
   role: 'ADMIN' | 'MANAGER' | 'WAITER' | 'KITCHEN';
+  permissions: AppPermission[];
   isActive: boolean;
   createdAt: string;
   venueUsers: VenueUserRelation[];
@@ -40,6 +58,7 @@ export function UsersAdminPage() {
   const [role, setRole] = useState<'ADMIN' | 'MANAGER' | 'WAITER' | 'KITCHEN'>('WAITER');
   const [isActive, setIsActive] = useState(true);
   const [selectedVenueIds, setSelectedVenueIds] = useState<number[]>([]);
+  const [selectedPermissions, setSelectedPermissions] = useState<AppPermission[]>([]);
 
   const loadData = async () => {
     try {
@@ -66,6 +85,7 @@ export function UsersAdminPage() {
     setRole('WAITER');
     setIsActive(true);
     setSelectedVenueIds([]);
+    setSelectedPermissions([]);
     setModalOpen(true);
   };
 
@@ -77,12 +97,19 @@ export function UsersAdminPage() {
     setRole(u.role);
     setIsActive(u.isActive);
     setSelectedVenueIds(u.venueUsers.map((vu) => vu.venueId));
+    setSelectedPermissions(u.permissions ?? []);
     setModalOpen(true);
   };
 
   const handleVenueToggle = (venueId: number) => {
     setSelectedVenueIds((prev) =>
       prev.includes(venueId) ? prev.filter((id) => id !== venueId) : [...prev, venueId]
+    );
+  };
+
+  const handlePermissionToggle = (permission: AppPermission) => {
+    setSelectedPermissions((prev) =>
+      prev.includes(permission) ? prev.filter((item) => item !== permission) : [...prev, permission]
     );
   };
 
@@ -97,6 +124,7 @@ export function UsersAdminPage() {
           role,
           isActive,
           venueIds: selectedVenueIds,
+          permissions: selectedPermissions,
         };
         if (password) payload.password = password;
 
@@ -115,6 +143,7 @@ export function UsersAdminPage() {
           password,
           role,
           venueIds: selectedVenueIds,
+          permissions: selectedPermissions,
         });
         toast.success('Usuario creado con éxito');
       }
@@ -151,6 +180,7 @@ export function UsersAdminPage() {
                 <th>Email</th>
                 <th>Rol</th>
                 <th>Sedes Asignadas</th>
+                <th>Permisos</th>
                 <th>Estado</th>
                 <th style={{ textAlign: 'right' }}>Acciones</th>
               </tr>
@@ -182,6 +212,11 @@ export function UsersAdminPage() {
                         ))
                       )}
                     </div>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                      {u.role === 'ADMIN' ? 'Total' : `${u.permissions.length} permisos`}
+                    </span>
                   </td>
                   <td>
                     <span className={`admin-badge ${u.isActive ? 'admin-badge--success' : 'admin-badge--muted'}`}>
@@ -303,6 +338,27 @@ export function UsersAdminPage() {
                   ))}
                 </div>
               </div>
+
+              {role !== 'ADMIN' && (
+                <div className="form-group">
+                  <label className="form-label">Permisos finos</label>
+                  <div className="admin-tag-grid" style={{ marginTop: 'var(--space-2)' }}>
+                    {PERMISSION_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className={`admin-tag-option ${selectedPermissions.includes(option.value) ? 'selected' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissions.includes(option.value)}
+                          onChange={() => handlePermissionToggle(option.value)}
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-4)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>

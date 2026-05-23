@@ -4,7 +4,8 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { closeCashRegister, closeTicket, getCashSummary, getTicketPreview, reprintTicket, closePartialTicket } from './tickets.service';
+import { addCashMovement, closeCashRegister, closeTicket, getCashSummary, getTicketPreview, openCashSession, reprintTicket, closePartialTicket } from './tickets.service';
+import { canAccessVenue, requirePermission } from '../auth/guards';
 
 const CloseTicketSchema = z.object({
   orderId:     z.number().int().positive(),
@@ -30,12 +31,22 @@ const ClosePartialTicketSchema = z.object({
 
 const CloseCashSchema = z.object({
   venueId: z.number().int().positive(),
+  countedAmount: z.coerce.number().min(0),
   notes: z.string().trim().max(500).optional(),
 });
 
-function canAccessVenue(request: Parameters<FastifyInstance['authenticate']>[0], venueId: number) {
-  return request.user.role === 'ADMIN' || request.user.venueIds.includes(venueId);
-}
+const OpenCashSchema = z.object({
+  venueId: z.number().int().positive(),
+  openingAmount: z.coerce.number().min(0),
+  notes: z.string().trim().max(500).optional(),
+});
+
+const CashMovementSchema = z.object({
+  venueId: z.number().int().positive(),
+  type: z.enum(['CASH_IN', 'CASH_OUT']),
+  amount: z.coerce.number().positive(),
+  description: z.string().trim().min(2).max(500),
+});
 
 export async function ticketsRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', fastify.authenticate);
@@ -69,19 +80,51 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
     const venueId = parseInt(request.query.venueId ?? '0', 10);
     if (!venueId) return reply.status(400).send({ error: 'venueId requerido' });
     if (!canAccessVenue(request, venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
 
     const summary = await getCashSummary(venueId);
     return reply.send({ data: summary });
   });
 
   /** POST /api/tickets/cash/close */
+  fastify.post('/cash/open', async (request, reply) => {
+    const body = OpenCashSchema.parse(request.body);
+    if (!canAccessVenue(request, body.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+    if (!requirePermission(request, reply, 'CLOSE_CASH')) return;
+
+    const session = await openCashSession({
+      venueId: body.venueId,
+      userId: request.user.userId,
+      openingAmount: body.openingAmount,
+      notes: body.notes,
+    });
+    return reply.status(201).send({ data: session });
+  });
+
+  fastify.post('/cash/movements', async (request, reply) => {
+    const body = CashMovementSchema.parse(request.body);
+    if (!canAccessVenue(request, body.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+    if (!requirePermission(request, reply, 'CLOSE_CASH')) return;
+
+    const movement = await addCashMovement({
+      venueId: body.venueId,
+      userId: request.user.userId,
+      type: body.type,
+      amount: body.amount,
+      description: body.description,
+    });
+    return reply.status(201).send({ data: movement });
+  });
+
   fastify.post('/cash/close', async (request, reply) => {
     const body = CloseCashSchema.parse(request.body);
     if (!canAccessVenue(request, body.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+    if (!requirePermission(request, reply, 'CLOSE_CASH')) return;
 
     const closure = await closeCashRegister({
       venueId: body.venueId,
       userId: request.user.userId,
+      countedAmount: body.countedAmount,
       notes: body.notes,
     });
     return reply.status(201).send({ data: closure });
@@ -95,6 +138,7 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
 
   /** POST /api/tickets/:id/reprint */
   fastify.post<{ Params: { id: string } }>('/:id/reprint', async (request, reply) => {
+    if (!requirePermission(request, reply, 'REPRINT_TICKETS')) return;
     const data = await reprintTicket(parseInt(request.params.id, 10));
     return reply.send({ data });
   });

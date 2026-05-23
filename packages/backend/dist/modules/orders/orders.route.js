@@ -6,6 +6,7 @@ const client_1 = require("../../db/client");
 const client_2 = require("@prisma/client");
 const printer_service_1 = require("../printing/printer.service");
 const menuSelection_1 = require("./menuSelection");
+const guards_1 = require("../auth/guards");
 const CreateOrderSchema = zod_1.z.object({
     tableId: zod_1.z.number().int().positive(),
     venueId: zod_1.z.number().int().positive(),
@@ -413,6 +414,8 @@ async function ordersRoutes(fastify) {
     });
     /** POST /api/orders/kitchen-note — Imprime un aviso manual a cocina */
     fastify.post('/kitchen-note', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'SEND_KITCHEN_NOTE'))
+            return;
         const body = KitchenNoteSchema.parse(request.body);
         const [waiter, kitchenPrinters, table, activeOrder] = await Promise.all([
             client_1.prisma.user.findUnique({ where: { id: request.user.userId }, select: { name: true } }),
@@ -473,6 +476,8 @@ async function ordersRoutes(fastify) {
     });
     /** DELETE /api/orders/:id/items/:itemId */
     fastify.delete('/:id/items/:itemId', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'EDIT_OPEN_ORDERS'))
+            return;
         const orderId = parseInt(request.params.id, 10);
         const itemId = parseInt(request.params.itemId, 10);
         const order = await client_1.prisma.order.findUnique({ where: { id: orderId } });
@@ -721,6 +726,8 @@ async function ordersRoutes(fastify) {
     });
     /** POST /api/orders/:id/items/:itemId/cancel — Cancelar/Reducir item enviado */
     fastify.post('/:id/items/:itemId/cancel', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'CANCEL_SENT_ITEMS'))
+            return;
         const orderId = parseInt(request.params.id, 10);
         const itemId = parseInt(request.params.itemId, 10);
         const body = zod_1.z.object({ quantity: zod_1.z.number().int().positive() }).parse(request.body);

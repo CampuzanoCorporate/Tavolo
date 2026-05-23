@@ -12,6 +12,8 @@ import { z } from 'zod';
 import { prisma } from '../../db/client';
 import { Prisma } from '@prisma/client';
 import { hashPassword } from '../auth/auth.service';
+import { APP_PERMISSIONS } from '../auth/permissions';
+import { requirePermission } from '../auth/guards';
 
 // ─── SCHEMAS DE VALIDACIÓN ────────────────────────────────────────────────────
 
@@ -139,6 +141,7 @@ const UserCreateSchema = z.object({
   password: z.string().min(6),
   role: z.enum(['ADMIN', 'MANAGER', 'WAITER', 'KITCHEN']),
   venueIds: z.array(z.number().int().positive()).optional().default([]),
+  permissions: z.array(z.enum(APP_PERMISSIONS)).optional().default([]),
 });
 
 const UserUpdateSchema = z.object({
@@ -147,6 +150,7 @@ const UserUpdateSchema = z.object({
   isActive: z.boolean().optional(),
   password: z.string().min(6).optional(),
   venueIds: z.array(z.number().int().positive()).optional(),
+  permissions: z.array(z.enum(APP_PERMISSIONS)).optional(),
 });
 
 // ─── HELPER: Validar acceso de sede ──────────────────────────────────────────
@@ -197,6 +201,39 @@ function mapProductUpdatePayload(body: z.infer<typeof ProductUpdateSchema>): Pri
 export async function adminRoutes(fastify: FastifyInstance) {
   // Todas las rutas admin requieren autenticación
   fastify.addHook('onRequest', fastify.authenticate);
+  fastify.addHook('preHandler', async (request, reply) => {
+    const path = request.url;
+
+    if (path.includes('/dashboard/owner-metrics')) {
+      if (!requirePermission(request, reply, 'VIEW_OWNER_DASHBOARD')) return reply;
+      return;
+    }
+
+    if (path.includes('/users')) {
+      if (!requirePermission(request, reply, 'MANAGE_USERS')) return reply;
+      return;
+    }
+
+    if (path.includes('/categories') || path.includes('/products')) {
+      if (!requirePermission(request, reply, 'MANAGE_CATALOG')) return reply;
+      return;
+    }
+
+    if (path.includes('/tables')) {
+      if (!requirePermission(request, reply, 'MANAGE_TABLES')) return reply;
+      return;
+    }
+
+    if (path.includes('/printers') || path.includes('/production-stations')) {
+      if (!requirePermission(request, reply, 'MANAGE_PRINTERS')) return reply;
+      return;
+    }
+
+    if (path.includes('/tickets') || path.includes('/cash-closures')) {
+      if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return reply;
+      return;
+    }
+  });
 
   // ── Organización ───────────────────────────────────────────────────────────
 
@@ -207,6 +244,107 @@ export async function adminRoutes(fastify: FastifyInstance) {
       include: { venues: { where: { isActive: true }, orderBy: { name: 'asc' } } },
     });
     return reply.send({ data: org });
+  });
+
+  fastify.get('/dashboard/owner-metrics', async (request, reply) => {
+    if (request.user.role !== 'ADMIN' && request.user.role !== 'MANAGER') {
+      return reply.status(403).send({ error: 'Sin acceso al panel del dueño' });
+    }
+    if (!requirePermission(request, reply, 'VIEW_OWNER_DASHBOARD')) return;
+
+    const organisationId = request.user.organisationId;
+    const now = new Date();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [ticketsToday, ticketsMonth, ticketsAll, venues, orderItems] = await Promise.all([
+      prisma.ticket.findMany({
+        where: { venue: { organisationId }, issuedAt: { gte: todayStart, lte: now } },
+        select: { total: true, issuedAt: true, venueId: true },
+      }),
+      prisma.ticket.findMany({
+        where: { venue: { organisationId }, issuedAt: { gte: monthStart, lte: now } },
+        select: { total: true, issuedAt: true, venueId: true },
+      }),
+      prisma.ticket.findMany({
+        where: { venue: { organisationId } },
+        select: { total: true },
+      }),
+      prisma.venue.findMany({
+        where: { organisationId, isActive: true },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.orderItem.findMany({
+        where: { order: { venue: { organisationId } } },
+        include: { product: { select: { name: true } } },
+      }),
+    ]);
+
+    const todayTotal = ticketsToday.reduce((sum, ticket) => sum + Number(ticket.total), 0);
+    const monthTotal = ticketsMonth.reduce((sum, ticket) => sum + Number(ticket.total), 0);
+    const totalFactured = ticketsAll.reduce((sum, ticket) => sum + Number(ticket.total), 0);
+
+    const hourlyMap = new Map<number, number>();
+    for (const ticket of ticketsToday) {
+      const hour = new Date(ticket.issuedAt).getHours();
+      hourlyMap.set(hour, (hourlyMap.get(hour) ?? 0) + Number(ticket.total));
+    }
+
+    const hourlySales = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      total: Math.round((hourlyMap.get(hour) ?? 0) * 100) / 100,
+    }));
+
+    const venueTotals = venues.map((venue) => {
+      const venueTickets = ticketsMonth.filter((ticket) => ticket.venueId === venue.id);
+      const billedTotal = venueTickets.reduce((sum, ticket) => sum + Number(ticket.total), 0);
+      return {
+        venueId: venue.id,
+        venueName: venue.name,
+        ticketCount: venueTickets.length,
+        billedTotal: Math.round(billedTotal * 100) / 100,
+      };
+    }).sort((a, b) => b.billedTotal - a.billedTotal);
+
+    const topProductsMap = new Map<string, { productName: string; quantity: number; revenue: number }>();
+    for (const item of orderItems) {
+      const current = topProductsMap.get(item.product.name) ?? {
+        productName: item.product.name,
+        quantity: 0,
+        revenue: 0,
+      };
+      current.quantity += item.quantity;
+      current.revenue += Number(item.unitPrice) * item.quantity;
+      topProductsMap.set(item.product.name, current);
+    }
+
+    const topProducts = Array.from(topProductsMap.values())
+      .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
+      .slice(0, 8)
+      .map((entry) => ({ ...entry, revenue: Math.round(entry.revenue * 100) / 100 }));
+
+    return reply.send({
+      data: {
+        today: {
+          billedTotal: Math.round(todayTotal * 100) / 100,
+          ticketCount: ticketsToday.length,
+          avgTicket: ticketsToday.length > 0 ? Math.round((todayTotal / ticketsToday.length) * 100) / 100 : 0,
+        },
+        month: {
+          billedTotal: Math.round(monthTotal * 100) / 100,
+          ticketCount: ticketsMonth.length,
+        },
+        organisation: {
+          billedTotal: Math.round(totalFactured * 100) / 100,
+          venueCount: venues.length,
+        },
+        hourlySales,
+        venueTotals,
+        topProducts,
+      },
+    });
   });
 
   /** PUT /api/admin/organisation — Actualizar datos fiscales/contacto */
@@ -651,10 +789,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (request.user.role !== 'ADMIN' && request.user.role !== 'MANAGER') {
       return reply.status(403).send({ error: 'Sin permisos' });
     }
+    if (!requirePermission(request, reply, 'MANAGE_USERS')) return;
     const users = await prisma.user.findMany({
       where: { organisationId: request.user.organisationId },
       select: {
-        id: true, name: true, email: true, role: true, isActive: true, createdAt: true,
+        id: true, name: true, email: true, role: true, permissions: true, isActive: true, createdAt: true,
         venueUsers: { include: { venue: { select: { id: true, name: true } } } },
       },
       orderBy: { name: 'asc' },
@@ -667,6 +806,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (request.user.role !== 'ADMIN') {
       return reply.status(403).send({ error: 'Solo el ADMIN puede crear usuarios' });
     }
+    if (!requirePermission(request, reply, 'MANAGE_USERS')) return;
     const body = UserCreateSchema.parse(request.body);
     const hashedPassword = await hashPassword(body.password);
 
@@ -677,6 +817,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
           email: body.email.toLowerCase(),
           password: hashedPassword,
           role: body.role,
+          permissions: body.role === 'ADMIN' ? [...APP_PERMISSIONS] : body.permissions,
           organisationId: request.user.organisationId,
         },
       });
@@ -698,12 +839,14 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (request.user.role !== 'ADMIN') {
       return reply.status(403).send({ error: 'Solo el ADMIN puede modificar usuarios' });
     }
+    if (!requirePermission(request, reply, 'MANAGE_USERS')) return;
     const userId = parseInt(request.params.id, 10);
     const body = UserUpdateSchema.parse(request.body);
 
     const updateData: Record<string, unknown> = {};
     if (body.name) updateData.name = body.name;
     if (body.role) updateData.role = body.role;
+    if (body.permissions !== undefined) updateData.permissions = (body.role === 'ADMIN' ? [...APP_PERMISSIONS] : body.permissions);
     if (body.isActive !== undefined) updateData.isActive = body.isActive;
     if (body.password) updateData.password = await hashPassword(body.password);
 
@@ -731,6 +874,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   }>('/venues/:id/tickets', async (request, reply) => {
     const venueId = parseInt(request.params.id, 10);
     assertVenueAccess(venueId, request.user.venueIds, request.user.role);
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
     const { limit = '50', offset = '0', aeatStatus } = request.query;
     const tickets = await prisma.ticket.findMany({
       where: {
@@ -758,6 +902,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { id: string } }>('/venues/:id/cash-closures', async (request, reply) => {
     const venueId = parseInt(request.params.id, 10);
     assertVenueAccess(venueId, request.user.venueIds, request.user.role);
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
 
     try {
       const [closures, aggregate] = await Promise.all([

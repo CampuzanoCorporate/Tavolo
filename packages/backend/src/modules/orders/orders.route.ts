@@ -7,6 +7,7 @@ import { prisma } from '../../db/client';
 import { OrderStatus, Prisma, ProductionItemStatus, ProductionSourceType, TableStatus } from '@prisma/client';
 import { buildCommandaBuffer, buildKitchenMessageBuffer, sendToPrinter } from '../printing/printer.service';
 import { buildMenuSummary, decodeMenuSelection, encodeMenuSelection, getVisibleNotes, type MenuCourseTag } from './menuSelection';
+import { requirePermission } from '../auth/guards';
 
 const CreateOrderSchema = z.object({
   tableId: z.number().int().positive(),
@@ -502,6 +503,7 @@ export async function ordersRoutes(fastify: FastifyInstance) {
 
   /** POST /api/orders/kitchen-note — Imprime un aviso manual a cocina */
   fastify.post('/kitchen-note', async (request, reply) => {
+    if (!requirePermission(request, reply, 'SEND_KITCHEN_NOTE')) return;
     const body = KitchenNoteSchema.parse(request.body);
 
     const [waiter, kitchenPrinters, table, activeOrder] = await Promise.all([
@@ -572,6 +574,7 @@ export async function ordersRoutes(fastify: FastifyInstance) {
 
   /** DELETE /api/orders/:id/items/:itemId */
   fastify.delete<{ Params: { id: string; itemId: string } }>('/:id/items/:itemId', async (request, reply) => {
+    if (!requirePermission(request, reply, 'EDIT_OPEN_ORDERS')) return;
     const orderId = parseInt(request.params.id, 10);
     const itemId  = parseInt(request.params.itemId, 10);
     const order   = await prisma.order.findUnique({ where: { id: orderId } });
@@ -853,6 +856,7 @@ export async function ordersRoutes(fastify: FastifyInstance) {
   /** POST /api/orders/:id/items/:itemId/cancel — Cancelar/Reducir item enviado */
   fastify.post<{ Params: { id: string; itemId: string }; Body: { quantity: number } }>(
     '/:id/items/:itemId/cancel', async (request, reply) => {
+      if (!requirePermission(request, reply, 'CANCEL_SENT_ITEMS')) return;
       const orderId = parseInt(request.params.id, 10);
       const itemId  = parseInt(request.params.itemId, 10);
       const body    = z.object({ quantity: z.number().int().positive() }).parse(request.body);

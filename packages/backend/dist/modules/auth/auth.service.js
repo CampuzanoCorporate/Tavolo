@@ -17,6 +17,7 @@ exports.getUserProfile = getUserProfile;
  */
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const client_1 = require("../../db/client");
+const permissions_1 = require("./permissions");
 /**
  * Hashea una contraseña con bcrypt (coste 12).
  */
@@ -71,6 +72,7 @@ async function loginUser(email, password) {
         role: user.role,
         organisationId: user.organisationId,
         venueIds,
+        permissions: (0, permissions_1.getEffectivePermissions)(user.role, user.permissions),
     };
 }
 /**
@@ -84,6 +86,7 @@ async function getUserProfile(userId) {
             name: true,
             email: true,
             role: true,
+            permissions: true,
             isActive: true,
             createdAt: true,
             organisation: {

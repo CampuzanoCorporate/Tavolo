@@ -9,6 +9,7 @@
 import bcrypt from 'bcrypt';
 import { prisma } from '../../db/client';
 import type { JWTPayload } from '../../types/jwt';
+import { getEffectivePermissions } from './permissions';
 
 /**
  * Hashea una contraseña con bcrypt (coste 12).
@@ -69,6 +70,7 @@ export async function loginUser(email: string, password: string): Promise<JWTPay
     role: user.role,
     organisationId: user.organisationId,
     venueIds,
+    permissions: getEffectivePermissions(user.role, user.permissions),
   };
 }
 
@@ -83,6 +85,7 @@ export async function getUserProfile(userId: number) {
       name: true,
       email: true,
       role: true,
+      permissions: true,
       isActive: true,
       createdAt: true,
       organisation: {

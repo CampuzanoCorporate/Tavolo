@@ -16,6 +16,7 @@ export interface JWTPayload {
   organisationId: number;
   /** IDs de las sedes a las que tiene acceso el usuario */
   venueIds: number[];
+  permissions: string[];
 }
 
 declare module '@fastify/jwt' {

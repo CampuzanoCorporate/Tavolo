@@ -7,7 +7,7 @@
  * El encadenamiento de hashes es por venueId.
  * ============================================================
  */
-import { Prisma, OrderStatus, TableStatus } from '@prisma/client';
+import { CashMovementType, CashSessionStatus, Prisma, OrderStatus, TableStatus } from '@prisma/client';
 import { prisma } from '../../db/client';
 import {
   computeVerifactuHash,
@@ -38,19 +38,54 @@ export interface CloseTicketResult {
 }
 
 export interface CashSummaryResult {
+  activeSession: {
+    id: number;
+    status: 'OPEN' | 'CLOSED';
+    openedAt: Date;
+    openingAmount: number;
+    openingNotes?: string | null;
+    openedBy: { id: number; name: string };
+  } | null;
   periodStart: Date;
   periodEnd: Date;
   ticketCount: number;
   billedTotal: number;
+  openingAmount: number;
+  manualInTotal: number;
+  manualOutTotal: number;
+  expectedAmount: number;
   tickets: Array<{
     id: number;
     invoiceCode: string;
     issuedAt: Date;
     total: Prisma.Decimal;
   }>;
+  movements: Array<{
+    id: number;
+    type: 'OPENING' | 'CASH_IN' | 'CASH_OUT' | 'TICKET';
+    amount: number;
+    description?: string | null;
+    createdAt: Date;
+    user: { id: number; name: string };
+    ticket?: { id: number; invoiceCode: string } | null;
+  }>;
+}
+
+export interface CashSessionResult {
+  id: number;
+  venueId: number;
+  openedAt: Date;
+  openingAmount: Prisma.Decimal;
+  openingNotes: string | null;
+  status: 'OPEN' | 'CLOSED';
+  openedByUser: { id: number; name: string };
 }
 
 function isMissingCashClosuresTable(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
+}
+
+function isMissingCashTables(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
 }
 
@@ -203,6 +238,33 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
         issuedAt,
       },
     });
+
+    try {
+      const activeSession = await tx.cashSession.findFirst({
+        where: {
+          venueId,
+          status: CashSessionStatus.OPEN,
+        },
+        orderBy: { openedAt: 'desc' },
+        select: { id: true },
+      });
+
+      if (activeSession) {
+        await tx.cashMovement.create({
+          data: {
+            venueId,
+            sessionId: activeSession.id,
+            userId,
+            ticketId: newTicket.id,
+            type: CashMovementType.TICKET,
+            amount: new Prisma.Decimal(total),
+            description: `Ticket ${newTicket.invoiceCode}`,
+          },
+        });
+      }
+    } catch (error) {
+      if (!isMissingCashTables(error)) throw error;
+    }
 
     await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CLOSED } });
     await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.FREE } });
@@ -464,20 +526,48 @@ export async function reprintTicket(ticketId: number) {
 
 export async function getCashSummary(venueId: number): Promise<CashSummaryResult> {
   let lastClosure: { periodEnd: Date } | null = null;
+  let activeSession: {
+    id: number;
+    openedAt: Date;
+    openingAmount: Prisma.Decimal;
+    openingNotes: string | null;
+    status: CashSessionStatus;
+    openedByUser: { id: number; name: string };
+  } | null = null;
+
   try {
-    lastClosure = await prisma.cashClosure.findFirst({
-      where: { venueId },
-      orderBy: { periodEnd: 'desc' },
-      select: { periodEnd: true },
-    });
+    const [lastClosureResult, activeSessionResult] = await Promise.all([
+      prisma.cashClosure.findFirst({
+        where: { venueId },
+        orderBy: { periodEnd: 'desc' },
+        select: { periodEnd: true },
+      }),
+      prisma.cashSession.findFirst({
+        where: { venueId, status: CashSessionStatus.OPEN },
+        orderBy: { openedAt: 'desc' },
+        select: {
+          id: true,
+          openedAt: true,
+          openingAmount: true,
+          openingNotes: true,
+          status: true,
+          openedByUser: {
+            select: { id: true, name: true },
+          },
+        },
+      }),
+    ]);
+
+    lastClosure = lastClosureResult;
+    activeSession = activeSessionResult;
   } catch (error) {
     if (!isMissingCashClosuresTable(error)) throw error;
   }
 
-  const periodStart = lastClosure?.periodEnd ?? new Date(new Date().setHours(0, 0, 0, 0));
+  const periodStart = activeSession?.openedAt ?? lastClosure?.periodEnd ?? new Date(new Date().setHours(0, 0, 0, 0));
   const periodEnd = new Date();
 
-  const [tickets, aggregate] = await Promise.all([
+  const [tickets, aggregate, movements] = await Promise.all([
     prisma.ticket.findMany({
       where: {
         venueId,
@@ -500,30 +590,135 @@ export async function getCashSummary(venueId: number): Promise<CashSummaryResult
       _count: { id: true },
       _sum: { total: true },
     }),
+    activeSession
+      ? prisma.cashMovement.findMany({
+          where: { sessionId: activeSession.id },
+          include: {
+            user: { select: { id: true, name: true } },
+            ticket: { select: { id: true, invoiceCode: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      : Promise.resolve([]),
   ]);
 
+  const openingAmount = Number(activeSession?.openingAmount ?? 0);
+  const manualInTotal = movements
+    .filter((movement) => movement.type === CashMovementType.CASH_IN)
+    .reduce((sum, movement) => sum + Number(movement.amount), 0);
+  const manualOutTotal = movements
+    .filter((movement) => movement.type === CashMovementType.CASH_OUT)
+    .reduce((sum, movement) => sum + Number(movement.amount), 0);
+  const billedTotal = Number(aggregate._sum.total ?? 0);
+  const expectedAmount = Math.round((openingAmount + billedTotal + manualInTotal - manualOutTotal) * 100) / 100;
+
   return {
+    activeSession: activeSession
+      ? {
+          id: activeSession.id,
+          status: activeSession.status,
+          openedAt: activeSession.openedAt,
+          openingAmount,
+          openingNotes: activeSession.openingNotes,
+          openedBy: activeSession.openedByUser,
+        }
+      : null,
     periodStart,
     periodEnd,
     ticketCount: aggregate._count.id,
-    billedTotal: Number(aggregate._sum.total ?? 0),
+    billedTotal,
+    openingAmount,
+    manualInTotal,
+    manualOutTotal,
+    expectedAmount,
     tickets,
+    movements: movements.map((movement) => ({
+      id: movement.id,
+      type: movement.type,
+      amount: Number(movement.amount),
+      description: movement.description,
+      createdAt: movement.createdAt,
+      user: movement.user,
+      ticket: movement.ticket,
+    })),
   };
 }
 
-export async function closeCashRegister(input: { venueId: number; userId: number; notes?: string }) {
-  const summary = await getCashSummary(input.venueId);
-  let closure;
+export async function openCashSession(input: { venueId: number; userId: number; openingAmount: number; notes?: string }): Promise<CashSessionResult> {
   try {
-    closure = await prisma.cashClosure.create({
+    const existingSession = await prisma.cashSession.findFirst({
+      where: {
+        venueId: input.venueId,
+        status: CashSessionStatus.OPEN,
+      },
+      select: { id: true },
+    });
+
+    if (existingSession) {
+      throw new Error('Ya hay una caja abierta en esta sede');
+    }
+
+    const session = await prisma.cashSession.create({
       data: {
         venueId: input.venueId,
+        openedByUserId: input.userId,
+        openingAmount: new Prisma.Decimal(input.openingAmount),
+        openingNotes: input.notes,
+        status: CashSessionStatus.OPEN,
+        movements: {
+          create: {
+            venueId: input.venueId,
+            userId: input.userId,
+            type: CashMovementType.OPENING,
+            amount: new Prisma.Decimal(input.openingAmount),
+            description: input.notes || 'Apertura de caja',
+          },
+        },
+      },
+      include: {
+        openedByUser: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    return session;
+  } catch (error) {
+    if (isMissingCashTables(error)) {
+      throw new Error('Las tablas de caja aún no están aplicadas en la base de datos');
+    }
+    throw error;
+  }
+}
+
+export async function addCashMovement(input: {
+  venueId: number;
+  userId: number;
+  type: 'CASH_IN' | 'CASH_OUT';
+  amount: number;
+  description: string;
+}) {
+  try {
+    const session = await prisma.cashSession.findFirst({
+      where: {
+        venueId: input.venueId,
+        status: CashSessionStatus.OPEN,
+      },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new Error('No hay una caja abierta para registrar movimientos');
+    }
+
+    return prisma.cashMovement.create({
+      data: {
+        venueId: input.venueId,
+        sessionId: session.id,
         userId: input.userId,
-        periodStart: summary.periodStart,
-        periodEnd: summary.periodEnd,
-        ticketCount: summary.ticketCount,
-        billedTotal: new Prisma.Decimal(summary.billedTotal),
-        notes: input.notes,
+        type: input.type,
+        amount: new Prisma.Decimal(input.amount),
+        description: input.description,
       },
       include: {
         user: {
@@ -532,8 +727,64 @@ export async function closeCashRegister(input: { venueId: number; userId: number
       },
     });
   } catch (error) {
-    if (isMissingCashClosuresTable(error)) {
-      throw new Error('La tabla de cierres de caja aún no está aplicada en la base de datos');
+    if (isMissingCashTables(error)) {
+      throw new Error('Las tablas de caja aún no están aplicadas en la base de datos');
+    }
+    throw error;
+  }
+}
+
+export async function closeCashRegister(input: { venueId: number; userId: number; countedAmount: number; notes?: string }) {
+  const summary = await getCashSummary(input.venueId);
+  if (!summary.activeSession) {
+    throw new Error('No hay una caja abierta para cerrar');
+  }
+
+  const discrepancyAmount = Math.round((input.countedAmount - summary.expectedAmount) * 100) / 100;
+
+  let closure;
+  try {
+    closure = await prisma.$transaction(async (tx) => {
+      await tx.cashSession.update({
+        where: { id: summary.activeSession!.id },
+        data: {
+          status: CashSessionStatus.CLOSED,
+          closedAt: summary.periodEnd,
+          closedByUserId: input.userId,
+          expectedAmount: new Prisma.Decimal(summary.expectedAmount),
+          countedAmount: new Prisma.Decimal(input.countedAmount),
+          discrepancyAmount: new Prisma.Decimal(discrepancyAmount),
+          closingNotes: input.notes,
+        },
+      });
+
+      return tx.cashClosure.create({
+        data: {
+          venueId: input.venueId,
+          userId: input.userId,
+          sessionId: summary.activeSession!.id,
+          periodStart: summary.periodStart,
+          periodEnd: summary.periodEnd,
+          ticketCount: summary.ticketCount,
+          billedTotal: new Prisma.Decimal(summary.billedTotal),
+          openingAmount: new Prisma.Decimal(summary.openingAmount),
+          manualInTotal: new Prisma.Decimal(summary.manualInTotal),
+          manualOutTotal: new Prisma.Decimal(summary.manualOutTotal),
+          expectedAmount: new Prisma.Decimal(summary.expectedAmount),
+          countedAmount: new Prisma.Decimal(input.countedAmount),
+          discrepancyAmount: new Prisma.Decimal(discrepancyAmount),
+          notes: input.notes,
+        },
+        include: {
+          user: {
+            select: { id: true, name: true },
+          },
+        },
+      });
+    });
+  } catch (error) {
+    if (isMissingCashTables(error) || isMissingCashClosuresTable(error)) {
+      throw new Error('Las tablas de caja aún no están aplicadas en la base de datos');
     }
     throw error;
   }

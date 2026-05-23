@@ -62,6 +62,67 @@ function getObjectVariant(table: Table) {
   return { className: `positioned-table--${table.objectType.toLowerCase()}-object`, icon: '' };
 }
 
+function ServiceIcon({ type }: { type: 'tables' | 'cash' | 'merge' | 'drawer' | 'kitchen' }) {
+  const commonProps = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+
+  switch (type) {
+    case 'tables':
+      return (
+        <svg {...commonProps}>
+          <rect x="3" y="4" width="8" height="6" rx="1.5" />
+          <rect x="13" y="4" width="8" height="6" rx="1.5" />
+          <rect x="3" y="14" width="8" height="6" rx="1.5" />
+          <rect x="13" y="14" width="8" height="6" rx="1.5" />
+        </svg>
+      );
+    case 'cash':
+      return (
+        <svg {...commonProps}>
+          <rect x="3" y="6" width="18" height="12" rx="2" />
+          <path d="M7 10h10" />
+          <path d="M7 14h5" />
+          <circle cx="17" cy="14" r="1.5" />
+        </svg>
+      );
+    case 'merge':
+      return (
+        <svg {...commonProps}>
+          <path d="M7 7h5a4 4 0 0 1 4 4v6" />
+          <path d="M7 17h5a4 4 0 0 0 4-4V7" />
+          <path d="m14 9 2-2 2 2" />
+          <path d="m14 15 2 2 2-2" />
+        </svg>
+      );
+    case 'drawer':
+      return (
+        <svg {...commonProps}>
+          <path d="M4 8h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+          <path d="M7 8V6.5A1.5 1.5 0 0 1 8.5 5h7A1.5 1.5 0 0 1 17 6.5V8" />
+          <path d="M9 13h6" />
+        </svg>
+      );
+    case 'kitchen':
+      return (
+        <svg {...commonProps}>
+          <path d="M4 5v8" />
+          <path d="M7 5v8" />
+          <path d="M4 9h3" />
+          <path d="M6 13v6" />
+          <path d="M14 5c0 3 0 5 3 7v7" />
+          <path d="M14 5v14" />
+        </svg>
+      );
+  }
+}
+
 export function TableMapPage() {
   const navigate = useNavigate();
   const { tables, setTables, setActiveTable, isOnline, currentVenueId } = useAppStore();
@@ -76,8 +137,16 @@ export function TableMapPage() {
   const [isOpenTablesModalOpen, setIsOpenTablesModalOpen] = useState(false);
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
   const [cashSummary, setCashSummary] = useState<CashSummaryData | null>(null);
+  const [cashOpeningAmount, setCashOpeningAmount] = useState('0');
+  const [cashOpeningNotes, setCashOpeningNotes] = useState('');
+  const [cashCountedAmount, setCashCountedAmount] = useState('');
   const [cashNotes, setCashNotes] = useState('');
+  const [cashMovementType, setCashMovementType] = useState<'CASH_IN' | 'CASH_OUT'>('CASH_IN');
+  const [cashMovementAmount, setCashMovementAmount] = useState('');
+  const [cashMovementDescription, setCashMovementDescription] = useState('');
   const [isLoadingCashSummary, setIsLoadingCashSummary] = useState(false);
+  const [isOpeningCash, setIsOpeningCash] = useState(false);
+  const [isSavingCashMovement, setIsSavingCashMovement] = useState(false);
   const [isClosingCash, setIsClosingCash] = useState(false);
   const previousReadyTablesRef = useRef<number[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -258,6 +327,7 @@ export function TableMapPage() {
       setIsCashModalOpen(true);
       const summary = await ticketsApi.getCashSummary(currentVenueId);
       setCashSummary(summary);
+      setCashCountedAmount(summary.activeSession ? summary.expectedAmount.toFixed(2) : '');
     } catch (error) {
       console.error('[TableMap] Error cargando movimientos de caja:', error);
       toast.error('No se pudieron cargar los movimientos de caja');
@@ -267,14 +337,90 @@ export function TableMapPage() {
     }
   };
 
+  const refreshCashSummary = async () => {
+    if (!currentVenueId) return;
+    const summary = await ticketsApi.getCashSummary(currentVenueId);
+    setCashSummary(summary);
+    if (summary.activeSession) {
+      setCashCountedAmount(summary.expectedAmount.toFixed(2));
+    } else {
+      setCashCountedAmount('');
+    }
+  };
+
+  const handleOpenCash = async () => {
+    if (!currentVenueId) return;
+    const openingAmount = Number(cashOpeningAmount);
+    if (!Number.isFinite(openingAmount) || openingAmount < 0) {
+      toast.error('Indica un importe de apertura valido');
+      return;
+    }
+
+    try {
+      setIsOpeningCash(true);
+      await ticketsApi.openCash({
+        venueId: currentVenueId,
+        openingAmount,
+        notes: cashOpeningNotes || undefined,
+      });
+      toast.success('Caja abierta correctamente');
+      setCashOpeningAmount('0');
+      setCashOpeningNotes('');
+      await refreshCashSummary();
+    } catch (error) {
+      console.error('[TableMap] Error abriendo caja:', error);
+      toast.error('No se pudo abrir la caja');
+    } finally {
+      setIsOpeningCash(false);
+    }
+  };
+
+  const handleSaveCashMovement = async () => {
+    if (!currentVenueId) return;
+    const amount = Number(cashMovementAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Indica un importe valido');
+      return;
+    }
+    if (!cashMovementDescription.trim()) {
+      toast.error('Indica un concepto para el movimiento');
+      return;
+    }
+
+    try {
+      setIsSavingCashMovement(true);
+      await ticketsApi.addCashMovement({
+        venueId: currentVenueId,
+        type: cashMovementType,
+        amount,
+        description: cashMovementDescription.trim(),
+      });
+      toast.success(cashMovementType === 'CASH_IN' ? 'Entrada de caja registrada' : 'Salida de caja registrada');
+      setCashMovementAmount('');
+      setCashMovementDescription('');
+      await refreshCashSummary();
+    } catch (error) {
+      console.error('[TableMap] Error guardando movimiento de caja:', error);
+      toast.error('No se pudo registrar el movimiento');
+    } finally {
+      setIsSavingCashMovement(false);
+    }
+  };
+
   const handleCloseCash = async () => {
     if (!currentVenueId) return;
+    const countedAmount = Number(cashCountedAmount);
+    if (!Number.isFinite(countedAmount) || countedAmount < 0) {
+      toast.error('Indica el efectivo contado correctamente');
+      return;
+    }
 
     try {
       setIsClosingCash(true);
-      await ticketsApi.closeCash({ venueId: currentVenueId, notes: cashNotes || undefined });
+      await ticketsApi.closeCash({ venueId: currentVenueId, countedAmount, notes: cashNotes || undefined });
       toast.success('Cierre de caja registrado');
       setCashNotes('');
+      setCashCountedAmount('');
       setIsCashModalOpen(false);
     } catch (error) {
       console.error('[TableMap] Error cerrando caja:', error);
@@ -287,25 +433,33 @@ export function TableMapPage() {
   return (
     <main className="table-map-page">
       <aside className="table-map-service-rail" aria-label="Servicio de sala">
-        <span className="table-map-service-rail__eyebrow">Servicio</span>
+        <div className="table-map-service-rail__header">
+          <span className="table-map-service-rail__eyebrow">Servicio</span>
+          <strong className="table-map-service-rail__title">Sala</strong>
+        </div>
         <button className="table-map-service-rail__btn" onClick={() => setIsOpenTablesModalOpen(true)}>
-          Mesas abiertas
+          <span className="table-map-service-rail__icon"><ServiceIcon type="tables" /></span>
+          <span className="table-map-service-rail__btn-label">Mesas abiertas</span>
         </button>
         <button className="table-map-service-rail__btn" onClick={() => void openCashModal()}>
-          Movimientos caja
+          <span className="table-map-service-rail__icon"><ServiceIcon type="cash" /></span>
+          <span className="table-map-service-rail__btn-label">Movimientos caja</span>
         </button>
         <button className="table-map-service-rail__btn" onClick={() => setIsMergeModalOpen(true)}>
-          Unir mesas
+          <span className="table-map-service-rail__icon"><ServiceIcon type="merge" /></span>
+          <span className="table-map-service-rail__btn-label">Unir mesas</span>
         </button>
         <button
           className="table-map-service-rail__btn"
           onClick={handleOpenDrawer}
           disabled={isOpeningDrawer}
         >
-          {isOpeningDrawer ? 'Abriendo...' : 'Abrir cajón'}
+          <span className="table-map-service-rail__icon"><ServiceIcon type="drawer" /></span>
+          <span className="table-map-service-rail__btn-label">{isOpeningDrawer ? 'Abriendo...' : 'Abrir cajon'}</span>
         </button>
         <button className="table-map-service-rail__btn table-map-service-rail__btn--accent" onClick={() => setIsKitchenNoteModalOpen(true)}>
-          Avisar a cocina
+          <span className="table-map-service-rail__icon"><ServiceIcon type="kitchen" /></span>
+          <span className="table-map-service-rail__btn-label">Avisar a cocina</span>
         </button>
       </aside>
 
@@ -504,52 +658,178 @@ export function TableMapPage() {
               <div className="admin-loading">Cargando movimientos...</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
-                    gap: 'var(--space-4)',
-                    flexWrap: 'wrap',
-                    padding: 'var(--space-4)',
-                    borderRadius: 'var(--radius-lg)',
-                    background: 'var(--color-surface-2)',
-                    border: '1px solid var(--color-border)',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 260 }}>
-                    <label className="form-label" htmlFor="cash-close-notes">Notas del cierre</label>
-                    <textarea
-                      id="cash-close-notes"
-                      className="modal__textarea"
-                      value={cashNotes}
-                      onChange={(event) => setCashNotes(event.target.value)}
-                      placeholder="Observaciones del cierre"
-                    />
+                {!cashSummary.activeSession ? (
+                  <div style={{ display: 'grid', gap: 'var(--space-4)', padding: 'var(--space-4)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                    <div>
+                      <strong style={{ display: 'block', marginBottom: 6 }}>No hay caja abierta</strong>
+                      <span style={{ color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>
+                        Abre caja antes de registrar movimientos y cierres.
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 220px) minmax(0, 1fr)', gap: 'var(--space-4)' }}>
+                      <div>
+                        <label className="form-label" htmlFor="cash-opening-amount">Fondo inicial</label>
+                        <input
+                          id="cash-opening-amount"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={cashOpeningAmount}
+                          onChange={(event) => setCashOpeningAmount(event.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label" htmlFor="cash-opening-notes">Notas de apertura</label>
+                        <textarea
+                          id="cash-opening-notes"
+                          className="modal__textarea"
+                          value={cashOpeningNotes}
+                          onChange={(event) => setCashOpeningNotes(event.target.value)}
+                          placeholder="Cambio inicial, observaciones..."
+                        />
+                      </div>
+                    </div>
+                    <div className="modal__actions" style={{ justifyContent: 'flex-end' }}>
+                      <button className="btn btn-primary" onClick={() => void handleOpenCash()} disabled={isOpeningCash}>
+                        {isOpeningCash ? 'Abriendo...' : 'Abrir caja'}
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                    <button className="btn btn-primary" onClick={() => void handleCloseCash()} disabled={isClosingCash}>
-                      {isClosingCash ? 'Registrando...' : 'Realizar cierre de caja'}
-                    </button>
-                  </div>
-                </div>
-
+                ) : (
+                  <>
                 <div className="admin-summary-grid">
+                  <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Fondo inicial</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.openingAmount).toFixed(2)} €</strong>
+                  </article>
                   <article className="admin-summary-card">
                     <span className="admin-summary-card__label">Total facturado</span>
                     <strong className="admin-summary-card__value">{Number(cashSummary.billedTotal).toFixed(2)} €</strong>
                   </article>
                   <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Entradas manuales</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.manualInTotal).toFixed(2)} €</strong>
+                  </article>
+                  <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Salidas manuales</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.manualOutTotal).toFixed(2)} €</strong>
+                  </article>
+                  <article className="admin-summary-card">
                     <span className="admin-summary-card__label">Tickets desde último cierre</span>
                     <strong className="admin-summary-card__value">{cashSummary.ticketCount}</strong>
+                  </article>
+                  <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Esperado en caja</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.expectedAmount).toFixed(2)} €</strong>
                   </article>
                 </div>
 
                 <div className="print-preview">
                   <div className="print-preview__paper">
+                    Caja abierta por: {cashSummary.activeSession.openedBy.name}
+                    {'\n'}
+                    Apertura: {new Date(cashSummary.activeSession.openedAt).toLocaleString('es-ES')}
+                    {'\n'}
                     Desde: {new Date(cashSummary.periodStart).toLocaleString('es-ES')}
                     {'\n'}
                     Hasta: {new Date(cashSummary.periodEnd).toLocaleString('es-ES')}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(320px, 360px)', gap: 'var(--space-4)' }}>
+                  <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+                      <strong>Movimientos manuales</strong>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Entradas y salidas</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '160px 140px minmax(0, 1fr)', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+                      <select className="form-select" value={cashMovementType} onChange={(event) => setCashMovementType(event.target.value as 'CASH_IN' | 'CASH_OUT')}>
+                        <option value="CASH_IN">Entrada</option>
+                        <option value="CASH_OUT">Salida</option>
+                      </select>
+                      <input
+                        className="form-input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Importe"
+                        value={cashMovementAmount}
+                        onChange={(event) => setCashMovementAmount(event.target.value)}
+                      />
+                      <input
+                        className="form-input"
+                        type="text"
+                        placeholder="Concepto"
+                        value={cashMovementDescription}
+                        onChange={(event) => setCashMovementDescription(event.target.value)}
+                      />
+                    </div>
+                    <div className="modal__actions" style={{ justifyContent: 'flex-end', marginBottom: 'var(--space-3)' }}>
+                      <button className="btn btn-secondary" onClick={() => void handleSaveCashMovement()} disabled={isSavingCashMovement}>
+                        {isSavingCashMovement ? 'Guardando...' : 'Registrar movimiento'}
+                      </button>
+                    </div>
+                    <div className="pos-open-tables-list">
+                      {cashSummary.movements.length === 0 ? (
+                        <div className="admin-modifier-empty">Sin movimientos todavía.</div>
+                      ) : (
+                        cashSummary.movements
+                          .filter((movement) => movement.type !== 'TICKET')
+                          .map((movement) => (
+                            <div key={movement.id} className="pos-open-tables-list__item" style={{ cursor: 'default' }}>
+                              <strong>{movement.type === 'OPENING' ? 'Apertura' : movement.type === 'CASH_IN' ? 'Entrada' : 'Salida'}</strong>
+                              <span>
+                                {new Date(movement.createdAt).toLocaleString('es-ES')} · {movement.user.name} · {Number(movement.amount).toFixed(2)} €
+                              </span>
+                              {movement.description ? <span>{movement.description}</span> : null}
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                    <strong style={{ display: 'block', marginBottom: 'var(--space-3)' }}>Cierre y arqueo</strong>
+                    <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+                      <div>
+                        <label className="form-label" htmlFor="cash-counted-amount">Efectivo contado</label>
+                        <input
+                          id="cash-counted-amount"
+                          className="form-input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={cashCountedAmount}
+                          onChange={(event) => setCashCountedAmount(event.target.value)}
+                        />
+                      </div>
+                      <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: '#fffdf9', border: '1px solid var(--color-border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', fontSize: '0.86rem' }}>
+                          <span>Esperado</span>
+                          <strong>{Number(cashSummary.expectedAmount).toFixed(2)} €</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', fontSize: '0.9rem', marginTop: 8 }}>
+                          <span>Descuadre</span>
+                          <strong style={{ color: Number(cashCountedAmount || 0) - Number(cashSummary.expectedAmount) === 0 ? 'var(--color-text-primary)' : 'var(--color-danger)' }}>
+                            {(Number(cashCountedAmount || 0) - Number(cashSummary.expectedAmount)).toFixed(2)} €
+                          </strong>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="form-label" htmlFor="cash-close-notes">Notas del cierre</label>
+                        <textarea
+                          id="cash-close-notes"
+                          className="modal__textarea"
+                          value={cashNotes}
+                          onChange={(event) => setCashNotes(event.target.value)}
+                          placeholder="Observaciones del cierre"
+                        />
+                      </div>
+                      <button className="btn btn-primary" onClick={() => void handleCloseCash()} disabled={isClosingCash}>
+                        {isClosingCash ? 'Registrando...' : 'Realizar cierre de caja'}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -571,6 +851,8 @@ export function TableMapPage() {
                     ))
                   )}
                 </div>
+                  </>
+                )}
 
                 <div className="modal__actions">
                   <button className="btn btn-secondary" onClick={() => setIsCashModalOpen(false)}>Cerrar</button>

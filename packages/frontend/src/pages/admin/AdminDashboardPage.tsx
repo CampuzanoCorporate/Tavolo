@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { adminApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
-import type { Venue, Organisation } from '../../types';
+import type { Venue, Organisation, OwnerDashboardMetrics } from '../../types';
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
@@ -14,6 +14,7 @@ export function AdminDashboardPage() {
   const [org, setOrg] = useState<Organisation | null>(null);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [usersCount, setUsersCount] = useState<number>(0);
+  const [metrics, setMetrics] = useState<OwnerDashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,6 +28,13 @@ export function AdminDashboardPage() {
 
         const usersData = await adminApi.getUsers();
         setUsersCount(usersData.length);
+
+        try {
+          const ownerMetrics = await adminApi.getOwnerMetrics();
+          setMetrics(ownerMetrics);
+        } catch {
+          setMetrics(null);
+        }
       } catch (err) {
         console.error('Error loading dashboard data', err);
         toast.error('Error cargando datos del dashboard');
@@ -45,7 +53,7 @@ export function AdminDashboardPage() {
       <div className="admin-page-header">
         <div>
           <h1 className="admin-page-title">Resumen</h1>
-          <p className="admin-page-subtitle">Vista general de tu organización y sedes</p>
+          <p className="admin-page-subtitle">Vista general de tu organización, ventas y rendimiento por sede</p>
         </div>
       </div>
 
@@ -76,6 +84,34 @@ export function AdminDashboardPage() {
 
       {/* Stats Grid */}
       <div className="admin-cards-grid" style={{ marginBottom: 'var(--space-6)' }}>
+        <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="admin-badge admin-badge--success">Hoy</span>
+          </div>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              {formatCurrency(metrics?.today.billedTotal ?? 0)}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+              {metrics?.today.ticketCount ?? 0} tickets · Ticket medio {formatCurrency(metrics?.today.avgTicket ?? 0)}
+            </p>
+          </div>
+        </div>
+
+        <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="admin-badge admin-badge--info">Mes</span>
+          </div>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              {formatCurrency(metrics?.month.billedTotal ?? 0)}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+              {metrics?.month.ticketCount ?? 0} tickets emitidos este mes
+            </p>
+          </div>
+        </div>
+
         <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="admin-badge admin-badge--info">Sede</span>
@@ -118,6 +154,54 @@ export function AdminDashboardPage() {
           </div>
         </div>
       </div>
+
+      {metrics && (
+        <div className="admin-cards-grid" style={{ marginBottom: 'var(--space-6)' }}>
+          <section className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+            <h3 style={{ fontWeight: 800, marginBottom: 'var(--space-3)' }}>Sedes por facturación</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {metrics.venueTotals.slice(0, 5).map((entry) => (
+                <div key={entry.venueId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+                    <strong>{entry.venueName}</strong>
+                    <span>{formatCurrency(entry.billedTotal)}</span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                    {entry.ticketCount} tickets
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+            <h3 style={{ fontWeight: 800, marginBottom: 'var(--space-3)' }}>Top productos</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {metrics.topProducts.slice(0, 6).map((entry) => (
+                <div key={entry.productName} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+                  <div>
+                    <strong>{entry.productName}</strong>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{entry.quantity} uds.</div>
+                  </div>
+                  <span>{formatCurrency(entry.revenue)}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+            <h3 style={{ fontWeight: 800, marginBottom: 'var(--space-3)' }}>Ventas por hora</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              {metrics.hourlySales.filter((entry) => entry.total > 0).slice(0, 8).map((entry) => (
+                <div key={entry.hour} style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+                  <span>{String(entry.hour).padStart(2, '0')}:00</span>
+                  <strong>{formatCurrency(entry.total)}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Venues Summary list */}
       <section className="admin-section">
@@ -188,4 +272,8 @@ export function AdminDashboardPage() {
       </section>
     </div>
   );
+}
+
+function formatCurrency(value: number) {
+  return `${value.toFixed(2)} €`;
 }

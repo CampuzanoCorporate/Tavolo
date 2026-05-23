@@ -5,7 +5,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthUser, CartItem, CartSummary, Category, Order, Table, Venue } from '../types';
+import type { AuthUser, CartItem, CartSummary, Category, LicenseStatusData, Order, Table, Venue } from '../types';
 
 interface AppState {
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -21,6 +21,7 @@ interface AppState {
   // ── Conexión ──────────────────────────────────────────────────────────────
   isOnline: boolean;
   pendingOrdersCount: number;
+  licenseStatus: LicenseStatusData | null;
 
   // ── Mesas ─────────────────────────────────────────────────────────────────
   tables: Table[];
@@ -43,6 +44,7 @@ interface AppState {
   // ── Acciones Estado ───────────────────────────────────────────────────────
   setIsOnline: (online: boolean) => void;
   setPendingOrdersCount: (count: number) => void;
+  setLicenseStatus: (status: LicenseStatusData | null) => void;
 
   // ── Acciones Mesas ────────────────────────────────────────────────────────
   setTables: (tables: Table[]) => void;
@@ -74,6 +76,7 @@ export const useAppStore = create<AppState>()(
       currentVenue: null,
       isOnline: navigator.onLine,
       pendingOrdersCount: 0,
+      licenseStatus: null,
       tables: [],
       activeTable: null,
       categories: [],
@@ -108,6 +111,7 @@ export const useAppStore = create<AppState>()(
           availableVenueIds: [],
           currentVenueId: null,
           currentVenue: null,
+          licenseStatus: null,
           tables: [],
           categories: [],
           cartItems: [],
@@ -125,6 +129,7 @@ export const useAppStore = create<AppState>()(
       // ── Estado ──────────────────────────────────────────────────────────
       setIsOnline:           (isOnline) => set({ isOnline }),
       setPendingOrdersCount: (pendingOrdersCount) => set({ pendingOrdersCount }),
+      setLicenseStatus:      (licenseStatus) => set({ licenseStatus }),
 
       // ── Mesas ────────────────────────────────────────────────────────────
       setTables:     (tables) => set({ tables }),

@@ -25,8 +25,9 @@ model Organisation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  venues Venue[]
-  users  User[]
+  venues   Venue[]
+  users    User[]
+  licenses License[]
 
   @@map("organisations")
 }
@@ -57,6 +58,8 @@ model Venue {
   orders     Order[]
   tickets    Ticket[]
   cashClosures CashClosure[]
+  cashSessions CashSession[]
+  cashMovements CashMovement[]
   venueUsers VenueUser[]
   products   Product[]
 
@@ -70,6 +73,7 @@ model User {
   name           String       @db.VarChar(100)
   email          String       @unique @db.VarChar(255)
   role           Role         @default(WAITER)
+  permissions    String[]     @default([])
   password       String       @db.VarChar(60)
   organisationId Int
   organisation   Organisation @relation(fields: [organisationId], references: [id])
@@ -77,10 +81,13 @@ model User {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  orders     Order[]
-  tickets    Ticket[]
-  cashClosures CashClosure[]
-  venueUsers VenueUser[]
+  orders            Order[]
+  tickets           Ticket[]
+  cashClosures      CashClosure[]
+  openedCashSessions CashSession[] @relation("CashSessionOpenedBy")
+  closedCashSessions CashSession[] @relation("CashSessionClosedBy")
+  cashMovements     CashMovement[]
+  venueUsers        VenueUser[]
 
   @@index([email])
   @@index([organisationId, role])
@@ -104,6 +111,14 @@ enum Role {
   KITCHEN
 
   @@map("role")
+}
+
+enum LicenseStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+
+  @@map("license_status")
 }
 
 // ─── MESAS ─────────────────────────────────────────────────────────────────
@@ -372,6 +387,8 @@ model Ticket {
   businessNif     String   @db.VarChar(20)
   businessAddress String   @db.VarChar(500)
 
+  cashMovements CashMovement[]
+
   @@unique([venueId, invoiceSeries, invoiceNumber])
   @@index([venueId, issuedAt])
   @@index([aeatStatus])
@@ -384,16 +401,112 @@ model CashClosure {
   venue        Venue    @relation(fields: [venueId], references: [id])
   userId       Int
   user         User     @relation(fields: [userId], references: [id])
+  sessionId    Int?     @unique
+  session      CashSession? @relation(fields: [sessionId], references: [id])
   periodStart  DateTime
   periodEnd    DateTime
   ticketCount  Int      @default(0)
   billedTotal  Decimal  @db.Decimal(10, 2)
+  openingAmount Decimal @default(0.00) @db.Decimal(10, 2)
+  manualInTotal Decimal @default(0.00) @db.Decimal(10, 2)
+  manualOutTotal Decimal @default(0.00) @db.Decimal(10, 2)
+  expectedAmount Decimal @default(0.00) @db.Decimal(10, 2)
+  countedAmount Decimal @default(0.00) @db.Decimal(10, 2)
+  discrepancyAmount Decimal @default(0.00) @db.Decimal(10, 2)
   notes        String?  @db.Text
   createdAt    DateTime @default(now())
 
   @@index([venueId, periodEnd])
   @@index([userId, createdAt])
   @@map("cash_closures")
+}
+
+model CashSession {
+  id                Int               @id @default(autoincrement())
+  venueId           Int
+  venue             Venue             @relation(fields: [venueId], references: [id])
+  openedByUserId    Int
+  openedByUser      User              @relation("CashSessionOpenedBy", fields: [openedByUserId], references: [id])
+  closedByUserId    Int?
+  closedByUser      User?             @relation("CashSessionClosedBy", fields: [closedByUserId], references: [id])
+  status            CashSessionStatus @default(OPEN)
+  openingAmount     Decimal           @default(0.00) @db.Decimal(10, 2)
+  expectedAmount    Decimal?          @db.Decimal(10, 2)
+  countedAmount     Decimal?          @db.Decimal(10, 2)
+  discrepancyAmount Decimal?          @db.Decimal(10, 2)
+  openingNotes      String?           @db.Text
+  closingNotes      String?           @db.Text
+  openedAt          DateTime          @default(now())
+  closedAt          DateTime?
+
+  closure   CashClosure?
+  movements CashMovement[]
+
+  @@index([venueId, status])
+  @@index([openedByUserId, openedAt])
+  @@index([closedByUserId, closedAt])
+  @@map("cash_sessions")
+}
+
+model CashMovement {
+  id          Int              @id @default(autoincrement())
+  venueId     Int
+  venue       Venue            @relation(fields: [venueId], references: [id])
+  sessionId   Int
+  session     CashSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User             @relation(fields: [userId], references: [id])
+  ticketId    Int?
+  ticket      Ticket?          @relation(fields: [ticketId], references: [id])
+  type        CashMovementType
+  amount      Decimal          @db.Decimal(10, 2)
+  description String?          @db.Text
+  createdAt   DateTime         @default(now())
+
+  @@index([venueId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([userId, createdAt])
+  @@index([ticketId])
+  @@map("cash_movements")
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+
+  @@map("cash_session_status")
+}
+
+enum CashMovementType {
+  OPENING
+  CASH_IN
+  CASH_OUT
+  TICKET
+
+  @@map("cash_movement_type")
+}
+
+model License {
+  id               Int           @id @default(autoincrement())
+  organisationId   Int?
+  organisation     Organisation? @relation(fields: [organisationId], references: [id])
+  code             String        @unique @db.VarChar(64)
+  label            String?       @db.VarChar(120)
+  status           LicenseStatus @default(ACTIVE)
+  validFrom        DateTime      @default(now())
+  validUntil       DateTime
+  graceDays        Int           @default(7)
+  graceUntil       DateTime
+  activatedAt      DateTime?
+  lastValidatedAt  DateTime?
+  lastSeenAt       DateTime?
+  notes            String?       @db.Text
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([organisationId])
+  @@index([status, validUntil])
+  @@map("licenses")
 }
 
 enum AeatStatus {

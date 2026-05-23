@@ -287,15 +287,19 @@ export function TicketsLogPage() {
                 <th>Fecha cierre</th>
                 <th>Periodo</th>
                 <th>Responsable</th>
+                <th>Apertura</th>
                 <th>Tickets</th>
-                <th>Total cerrado</th>
+                <th>Facturado</th>
+                <th>Esperado</th>
+                <th>Contado</th>
+                <th>Descuadre</th>
                 <th>Notas</th>
               </tr>
             </thead>
             <tbody>
               {closures.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
                     No hay cierres registrados todavía.
                   </td>
                 </tr>
@@ -309,9 +313,21 @@ export function TicketsLogPage() {
                       {new Date(closure.periodEnd).toLocaleString('es-ES')}
                     </td>
                     <td>{closure.user.name}</td>
+                    <td style={{ fontWeight: 700 }}>
+                      {Number(closure.openingAmount ?? 0).toFixed(2)} €
+                    </td>
                     <td>{closure.ticketCount}</td>
                     <td style={{ fontWeight: 700, color: 'var(--color-accent)' }}>
                       {Number(closure.billedTotal).toFixed(2)} €
+                    </td>
+                    <td style={{ fontWeight: 700 }}>
+                      {Number(closure.expectedAmount ?? 0).toFixed(2)} €
+                    </td>
+                    <td style={{ fontWeight: 700 }}>
+                      {Number(closure.countedAmount ?? 0).toFixed(2)} €
+                    </td>
+                    <td style={{ fontWeight: 700, color: Number(closure.discrepancyAmount ?? 0) === 0 ? 'var(--color-text-primary)' : 'var(--color-danger)' }}>
+                      {Number(closure.discrepancyAmount ?? 0).toFixed(2)} €
                     </td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
                       {closure.notes || 'Sin notas'}

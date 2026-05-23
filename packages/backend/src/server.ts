@@ -16,6 +16,8 @@ import { tablesRoutes } from './modules/tables/tables.route';
 import { productsRoutes, printersRoutes } from './modules/products/products.route';
 import { adminRoutes } from './modules/admin/admin.route';
 import { prisma } from './db/client';
+import { licensingRoutes } from './modules/licensing/licensing.route';
+import { getOrganisationLicenseStatus } from './modules/licensing/licensing.service';
 
 async function bootstrap() {
   const app = Fastify({
@@ -48,6 +50,43 @@ async function bootstrap() {
   // ── Error handler ─────────────────────────────────────────────────────────
   app.setErrorHandler(buildErrorHandler());
 
+  app.addHook('preHandler', async (request, reply) => {
+    const path = request.routerPath ?? request.url;
+    const method = request.method.toUpperCase();
+
+    const skipPaths = [
+      '/health',
+      '/api/auth/login',
+      '/api/licensing/status',
+      '/api/licensing/current',
+      '/api/licensing/activate',
+    ];
+
+    if (skipPaths.some((prefix) => path.startsWith(prefix)) || path.startsWith('/api/licensing/center/')) {
+      return;
+    }
+
+    if (!request.user?.organisationId) {
+      return;
+    }
+
+    const license = await getOrganisationLicenseStatus(request.user.organisationId);
+    reply.header('x-license-state', license.effectiveState);
+
+    if (!license.canWrite && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      return reply.status(403).send({
+        statusCode: 403,
+        code: 'LICENSE_BLOCKED',
+        message: license.reason,
+        license: {
+          effectiveState: license.effectiveState,
+          validUntil: license.license?.validUntil ?? null,
+          graceUntil: license.license?.graceUntil ?? null,
+        },
+      });
+    }
+  });
+
   // ── Health check ──────────────────────────────────────────────────────────
   app.get('/health', async () => ({
     status: 'ok',
@@ -63,6 +102,7 @@ async function bootstrap() {
   await app.register(productsRoutes, { prefix: '/api/products' });
   await app.register(printersRoutes, { prefix: '/api/printers' });
   await app.register(adminRoutes,    { prefix: '/api/admin' });
+  await app.register(licensingRoutes, { prefix: '/api/licensing' });
 
   // ── Arrancar servidor ─────────────────────────────────────────────────────
   try {
