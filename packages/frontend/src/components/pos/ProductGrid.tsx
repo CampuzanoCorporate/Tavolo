@@ -7,10 +7,11 @@ import type { Product } from '../../types';
 interface ProductGridProps {
   products: Product[];
   accentColor: string;
+  categoryName?: string;
   onProductClick: (product: Product) => void;
 }
 
-export function ProductGrid({ products, accentColor, onProductClick }: ProductGridProps) {
+export function ProductGrid({ products, accentColor, categoryName, onProductClick }: ProductGridProps) {
   if (products.length === 0) {
     return (
       <div style={{
@@ -35,6 +36,14 @@ export function ProductGrid({ products, accentColor, onProductClick }: ProductGr
       aria-label="Productos disponibles"
       style={{ ['--product-family-color' as const]: accentColor } as CSSProperties}
     >
+      {categoryName && (
+        <div className="product-grid__intro" role="presentation">
+          <span className="product-grid__eyebrow">Selección actual</span>
+          <strong className="product-grid__title">{categoryName}</strong>
+          <span className="product-grid__meta">{products.length} artículos disponibles</span>
+        </div>
+      )}
+
       {products.map((product) => (
         <button
           key={product.id}

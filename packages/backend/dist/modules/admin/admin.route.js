@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminRoutes = adminRoutes;
 const zod_1 = require("zod");
 const client_1 = require("../../db/client");
-const auth_service_1 = require("../auth/auth.service");
 const client_2 = require("@prisma/client");
+const auth_service_1 = require("../auth/auth.service");
 // ─── SCHEMAS DE VALIDACIÓN ────────────────────────────────────────────────────
 const VenueCreateSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).max(200),
@@ -30,6 +30,7 @@ const CategorySchema = zod_1.z.object({
     icon: zod_1.z.string().max(50).optional().nullable(),
     sortOrder: zod_1.z.number().int().optional(),
     isActive: zod_1.z.boolean().optional(),
+    preparationStationId: zod_1.z.number().int().positive().nullable().optional(),
     modifierGroups: zod_1.z.array(zod_1.z.object({
         id: zod_1.z.number().int().positive().optional(),
         name: zod_1.z.string().min(1).max(100),
@@ -67,6 +68,7 @@ const ProductBaseSchema = zod_1.z.object({
         includeSecond: zod_1.z.boolean().default(false),
         finalMode: zod_1.z.enum(['DESSERT_ONLY', 'DESSERT_OR_COFFEE', 'DESSERT_AND_COFFEE']).default('DESSERT_ONLY'),
     }).nullable().optional(),
+    preparationStationId: zod_1.z.number().int().positive().nullable().optional(),
     isAvailable: zod_1.z.boolean().default(true),
     sortOrder: zod_1.z.number().int().optional(),
 });
@@ -93,8 +95,8 @@ const TableAdminSchema = zod_1.z.object({
     name: zod_1.z.string().max(50).optional().nullable(),
     seats: zod_1.z.number().int().nonnegative().default(4),
     zone: zod_1.z.string().max(50).optional().nullable(),
-    posX: zod_1.z.number().int().min(0).max(100).optional(),
-    posY: zod_1.z.number().int().min(0).max(100).optional(),
+    posX: zod_1.z.number().int().min(0).max(5000).optional(),
+    posY: zod_1.z.number().int().min(0).max(5000).optional(),
     objectType: zod_1.z.string().max(20).optional().default('TABLE'),
     width: zod_1.z.number().int().nonnegative().optional().default(0),
     height: zod_1.z.number().int().nonnegative().optional().default(0),
@@ -105,6 +107,13 @@ const PrinterSchema = zod_1.z.object({
     port: zod_1.z.number().int().min(1).max(65535).default(9100),
     type: zod_1.z.enum(['RECEIPT', 'KITCHEN', 'BAR']).default('RECEIPT'),
     isActive: zod_1.z.boolean().default(true),
+});
+const ProductionStationSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1).max(100),
+    code: zod_1.z.string().max(40).optional().nullable(),
+    printerId: zod_1.z.number().int().positive().nullable().optional(),
+    isActive: zod_1.z.boolean().default(true),
+    sortOrder: zod_1.z.number().int().default(0),
 });
 const UserCreateSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).max(100),
@@ -137,6 +146,7 @@ function mapProductPayload(body, venueId) {
         productType: body.productType,
         menuCourseTags: body.menuCourseTags,
         menuConfig: body.menuConfig === null ? client_2.Prisma.JsonNull : body.menuConfig,
+        preparationStationId: body.preparationStationId,
         isAvailable: body.isAvailable,
         sortOrder: body.sortOrder,
     };
@@ -159,6 +169,8 @@ function mapProductUpdatePayload(body) {
         data.menuCourseTags = body.menuCourseTags;
     if (body.menuConfig !== undefined)
         data.menuConfig = body.menuConfig === null ? client_2.Prisma.JsonNull : body.menuConfig;
+    if (body.preparationStationId !== undefined)
+        data.preparationStationId = body.preparationStationId;
     if (body.isAvailable !== undefined)
         data.isAvailable = body.isAvailable;
     if (body.sortOrder !== undefined)
@@ -283,6 +295,7 @@ async function adminRoutes(fastify) {
             data: {
                 ...categoryData,
                 venueId,
+                preparationStationId: categoryData.preparationStationId,
                 modifierGroups: modifierGroups.length > 0 ? {
                     create: modifierGroups.map((group) => ({
                         name: group.name,
@@ -496,6 +509,56 @@ async function adminRoutes(fastify) {
         await client_1.prisma.table.delete({ where: { id } });
         return reply.send({ success: true });
     });
+    // ── Secciones de producción ───────────────────────────────────────────────
+    /** GET /api/admin/venues/:id/production-stations */
+    fastify.get('/venues/:id/production-stations', async (request, reply) => {
+        const venueId = parseInt(request.params.id, 10);
+        assertVenueAccess(venueId, request.user.venueIds, request.user.role);
+        const stations = await client_1.prisma.productionStation.findMany({
+            where: { venueId },
+            include: {
+                printer: true,
+            },
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        });
+        return reply.send({ data: stations });
+    });
+    /** POST /api/admin/venues/:id/production-stations */
+    fastify.post('/venues/:id/production-stations', async (request, reply) => {
+        const venueId = parseInt(request.params.id, 10);
+        assertVenueAccess(venueId, request.user.venueIds, request.user.role);
+        const body = ProductionStationSchema.parse(request.body);
+        const station = await client_1.prisma.productionStation.create({
+            data: { ...body, venueId },
+            include: { printer: true },
+        });
+        return reply.status(201).send({ data: station });
+    });
+    /** PUT /api/admin/production-stations/:id */
+    fastify.put('/production-stations/:id', async (request, reply) => {
+        const id = parseInt(request.params.id, 10);
+        const station = await client_1.prisma.productionStation.findUnique({ where: { id } });
+        if (!station)
+            return reply.status(404).send({ error: 'Sección no encontrada' });
+        assertVenueAccess(station.venueId, request.user.venueIds, request.user.role);
+        const body = ProductionStationSchema.partial().parse(request.body);
+        const updated = await client_1.prisma.productionStation.update({
+            where: { id },
+            data: body,
+            include: { printer: true },
+        });
+        return reply.send({ data: updated });
+    });
+    /** DELETE /api/admin/production-stations/:id */
+    fastify.delete('/production-stations/:id', async (request, reply) => {
+        const id = parseInt(request.params.id, 10);
+        const station = await client_1.prisma.productionStation.findUnique({ where: { id } });
+        if (!station)
+            return reply.status(404).send({ error: 'Sección no encontrada' });
+        assertVenueAccess(station.venueId, request.user.venueIds, request.user.role);
+        await client_1.prisma.productionStation.update({ where: { id }, data: { isActive: false } });
+        return reply.send({ success: true });
+    });
     // ── Impresoras ─────────────────────────────────────────────────────────────
     /** GET /api/admin/venues/:id/printers */
     fastify.get('/venues/:id/printers', async (request, reply) => {
@@ -621,8 +684,58 @@ async function adminRoutes(fastify) {
             take: parseInt(limit, 10),
             skip: parseInt(offset, 10),
         });
-        const total = await client_1.prisma.ticket.count({ where: { venueId } });
-        return reply.send({ data: tickets, total });
+        const [total, aggregate] = await Promise.all([
+            client_1.prisma.ticket.count({ where: { venueId } }),
+            client_1.prisma.ticket.aggregate({
+                where: {
+                    venueId,
+                    ...(aeatStatus && { aeatStatus: aeatStatus }),
+                },
+                _sum: { total: true },
+            }),
+        ]);
+        return reply.send({ data: tickets, total, billedTotal: Number(aggregate._sum.total ?? 0) });
+    });
+    /** GET /api/admin/venues/:id/cash-closures — Histórico de cierres de caja */
+    fastify.get('/venues/:id/cash-closures', async (request, reply) => {
+        const venueId = parseInt(request.params.id, 10);
+        assertVenueAccess(venueId, request.user.venueIds, request.user.role);
+        try {
+            const [closures, aggregate] = await Promise.all([
+                client_1.prisma.cashClosure.findMany({
+                    where: { venueId },
+                    include: {
+                        user: {
+                            select: { id: true, name: true },
+                        },
+                    },
+                    orderBy: { periodEnd: 'desc' },
+                }),
+                client_1.prisma.cashClosure.aggregate({
+                    where: { venueId },
+                    _sum: { billedTotal: true, ticketCount: true },
+                }),
+            ]);
+            return reply.send({
+                data: closures,
+                totals: {
+                    billedTotal: Number(aggregate._sum.billedTotal ?? 0),
+                    ticketCount: Number(aggregate._sum.ticketCount ?? 0),
+                },
+            });
+        }
+        catch (error) {
+            if (error instanceof client_2.Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
+                return reply.send({
+                    data: [],
+                    totals: {
+                        billedTotal: 0,
+                        ticketCount: 0,
+                    },
+                });
+            }
+            throw error;
+        }
     });
 }
 //# sourceMappingURL=admin.route.js.map

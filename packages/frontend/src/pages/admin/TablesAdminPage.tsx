@@ -8,6 +8,17 @@ import toast from 'react-hot-toast';
 import { adminApi } from '../../services/api';
 import type { Table, Venue } from '../../types';
 
+const LEGACY_POSITION_THRESHOLD = 100;
+const FLOOR_PLAN_VIRTUAL_WIDTH = 1200;
+const FLOOR_PLAN_VIRTUAL_HEIGHT = 720;
+
+function resolveCanvasPosition(value: number, canvasSize: number, virtualSize: number) {
+  if (value <= LEGACY_POSITION_THRESHOLD) {
+    return Math.round((value / 100) * canvasSize);
+  }
+  return Math.round((value / virtualSize) * canvasSize);
+}
+
 export function TablesAdminPage() {
   const { id: venueIdStr } = useParams<{ id: string }>();
   const venueId = parseInt(venueIdStr!, 10);
@@ -23,6 +34,7 @@ export function TablesAdminPage() {
   const [activeZone, setActiveZone] = useState<string>('Principal');
   const [draggingTable, setDraggingTable] = useState<Table | null>(null);
   const [selectedMenuTableId, setSelectedMenuTableId] = useState<number | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
 
@@ -60,6 +72,26 @@ export function TablesAdminPage() {
   useEffect(() => {
     loadData();
   }, [venueId]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const updateCanvasSize = () => {
+      const rect = canvas.getBoundingClientRect();
+      setCanvasSize({
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
+    };
+
+    updateCanvasSize();
+
+    const observer = new ResizeObserver(updateCanvasSize);
+    observer.observe(canvas);
+
+    return () => observer.disconnect();
+  }, [loading, activeZone, tables.length]);
 
   const openNewTableModal = () => {
     setSelectedTableId(null);
@@ -102,6 +134,14 @@ export function TablesAdminPage() {
     setSaving(true);
     try {
       const isTable = objectType === 'TABLE';
+      const trimmedName = name.trim();
+
+      if (isTable && !trimmedName) {
+        toast.error('La mesa debe tener un nombre visible');
+        setSaving(false);
+        return;
+      }
+
       const assignedSeats = isTable ? seats : 0;
       
       let assignedNumber = number;
@@ -116,7 +156,7 @@ export function TablesAdminPage() {
 
       const payload = {
         number: assignedNumber,
-        name: name || undefined,
+        name: trimmedName || undefined,
         seats: assignedSeats,
         zone: zone || undefined,
         objectType,
@@ -124,21 +164,24 @@ export function TablesAdminPage() {
         height,
       };
 
+      const fallbackCenterX = Math.round(FLOOR_PLAN_VIRTUAL_WIDTH / 2);
+      const fallbackCenterY = Math.round(FLOOR_PLAN_VIRTUAL_HEIGHT / 2);
+
       if (selectedTableId) {
         // Conservar coordenadas previas al editar en el formulario
         const prevTable = tables.find(t => t.id === selectedTableId);
         await adminApi.updateTable(selectedTableId, {
           ...payload,
-          posX: prevTable?.posX ?? 50,
-          posY: prevTable?.posY ?? 50
+          posX: prevTable?.posX ?? fallbackCenterX,
+          posY: prevTable?.posY ?? fallbackCenterY,
         });
         toast.success(`${isTable ? 'Mesa' : 'Objeto'} actualizado`);
       } else {
-        // Nuevas mesas nacen en el centro (50%, 50%)
+        // Nuevos elementos nacen en el centro del lienzo de diseño
         await adminApi.createTable(venueId, {
           ...payload,
-          posX: 50,
-          posY: 50
+          posX: fallbackCenterX,
+          posY: fallbackCenterY,
         });
         toast.success(`${isTable ? 'Mesa' : 'Objeto'} creado`);
       }
@@ -179,14 +222,26 @@ export function TablesAdminPage() {
     const handleMove = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
 
-      // Calcular coordenadas porcentuales
-      const xPercent = Math.max(0, Math.min(100, Math.round(((clientX - rect.left) / rect.width) * 100)));
-      const yPercent = Math.max(0, Math.min(100, Math.round(((clientY - rect.top) / rect.height) * 100)));
+      // Guardamos coordenadas absolutas del lienzo para que no cambien al variar el tamaño visible.
+      const xPx = Math.max(
+        0,
+        Math.min(
+          FLOOR_PLAN_VIRTUAL_WIDTH,
+          Math.round(((clientX - rect.left) / rect.width) * FLOOR_PLAN_VIRTUAL_WIDTH),
+        ),
+      );
+      const yPx = Math.max(
+        0,
+        Math.min(
+          FLOOR_PLAN_VIRTUAL_HEIGHT,
+          Math.round(((clientY - rect.top) / rect.height) * FLOOR_PLAN_VIRTUAL_HEIGHT),
+        ),
+      );
 
       // Usamos callback funcional para evitar depender del estado 'tables'
       setTables((prevTables) =>
         prevTables.map((t) =>
-          t.id === draggingTable.id ? { ...t, posX: xPercent, posY: yPercent } : t
+          t.id === draggingTable.id ? { ...t, posX: xPx, posY: yPx } : t
         )
       );
     };
@@ -396,8 +451,8 @@ export function TablesAdminPage() {
                         key={table.id}
                         className={`positioned-table positioned-table--draggable ${objectClass} ${draggingClass}`}
                         style={{
-                          left: `${table.posX}%`,
-                          top: `${table.posY}%`,
+                          left: `${resolveCanvasPosition(table.posX, canvasSize.width || FLOOR_PLAN_VIRTUAL_WIDTH, FLOOR_PLAN_VIRTUAL_WIDTH)}px`,
+                          top: `${resolveCanvasPosition(table.posY, canvasSize.height || FLOOR_PLAN_VIRTUAL_HEIGHT, FLOOR_PLAN_VIRTUAL_HEIGHT)}px`,
                           cursor: 'move',
                           ...(table.width && table.width > 0 ? { width: `${table.width}px` } : {}),
                           ...(table.height && table.height > 0 ? { height: `${table.height}px` } : {}),
@@ -425,14 +480,15 @@ export function TablesAdminPage() {
                     : (isRound ? 'positioned-table--round' : 'positioned-table--square');
 
                   const statusClass = `positioned-table--${table.status.toLowerCase()}`;
+                  const displayName = table.name?.trim() || `Mesa ${table.number}`;
 
                   return (
                     <div
                       key={table.id}
                       className={`positioned-table positioned-table--draggable ${shapeClass} ${statusClass} ${draggingClass}`}
                       style={{
-                        left: `${table.posX}%`,
-                        top: `${table.posY}%`,
+                        left: `${resolveCanvasPosition(table.posX, canvasSize.width || FLOOR_PLAN_VIRTUAL_WIDTH, FLOOR_PLAN_VIRTUAL_WIDTH)}px`,
+                        top: `${resolveCanvasPosition(table.posY, canvasSize.height || FLOOR_PLAN_VIRTUAL_HEIGHT, FLOOR_PLAN_VIRTUAL_HEIGHT)}px`,
                         ...(table.width && table.width > 0 ? { width: `${table.width}px` } : {}),
                         ...(table.height && table.height > 0 ? { height: `${table.height}px` } : {}),
                       }}
@@ -440,14 +496,12 @@ export function TablesAdminPage() {
                       onTouchStart={(e) => handleStartDrag(table, e)}
                       title="Haz clic para ver opciones o arrastra para mover esta mesa"
                     >
-                      <span className="positioned-table__number">
-                        {table.number}
+                      <span className="positioned-table__label positioned-table__label--primary">
+                        {displayName}
                       </span>
-                      {table.name && (
-                        <span className="positioned-table__label">
-                          {table.name}
-                        </span>
-                      )}
+                      <span className="positioned-table__number positioned-table__number--secondary">
+                        #{table.number}
+                      </span>
                       <span className="positioned-table__seats">
                         {table.seats} pax
                       </span>
@@ -515,14 +569,15 @@ export function TablesAdminPage() {
 
               <div className="form-group">
                 <label className="form-label" htmlFor="table-name">
-                  {objectType === 'TABLE' ? 'Nombre / Etiqueta descriptiva (opcional)' : 'Nombre / Identificador del Objeto'}
+                  {objectType === 'TABLE' ? 'Nombre visible de la mesa *' : 'Nombre / Identificador del Objeto'}
                 </label>
                 <input
                   id="table-name"
                   className="form-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={objectType === 'TABLE' ? 'Ej: Terraza 4, Reservado' : 'Ej: Barra Principal, Planta Izq'}
+                  placeholder={objectType === 'TABLE' ? 'Ej: Terraza 4, Reservado, Ventana' : 'Ej: Barra Principal, Planta Izq'}
+                  required={objectType === 'TABLE'}
                 />
               </div>
 

@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
@@ -52,6 +52,8 @@ export const tablesApi = {
     apiClient.patch(`/api/tables/${id}/status`, { status }).then((r) => r.data.data),
   requestBill:   (id: number) =>
     apiClient.patch(`/api/tables/${id}/request-bill`).then((r) => r.data.data),
+  merge:         (data: { venueId: number; targetTableId: number; sourceTableIds: number[] }) =>
+    apiClient.post('/api/tables/merge', data).then((r) => r.data.data),
 };
 
 // ── Products ──────────────────────────────────────────────────────────────────
@@ -62,11 +64,11 @@ export const productsApi = {
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 export const ordersApi = {
-  create:      (data: { tableId: number; venueId: number; items: { productId: number; quantity: number; notes?: string }[] }) =>
+  create:      (data: { tableId: number; venueId: number; items: { productId: number; quantity: number; unitPrice?: number; notes?: string }[] }) =>
     apiClient.post<{ data: Order }>('/api/orders', data).then((r) => r.data.data),
   getByTable:  (tableId: number, venueId: number) =>
     apiClient.get<{ data: Order | null }>(`/api/orders/table/${tableId}`, { params: { venueId } }).then((r) => r.data.data),
-  addItem:     (orderId: number, item: { productId: number; quantity: number; notes?: string }) =>
+  addItem:     (orderId: number, item: { productId: number; quantity: number; unitPrice?: number; notes?: string }) =>
     apiClient.post(`/api/orders/${orderId}/items`, item).then((r) => r.data.data),
   sendToKitchen: (orderId: number) =>
     apiClient.patch(`/api/orders/${orderId}/send-kitchen`).then((r) => r.data.data),
@@ -74,6 +76,18 @@ export const ordersApi = {
     apiClient.patch(`/api/orders/${orderId}/cancel-and-free`).then((r) => r.data.data),
   sendKitchenNote: (data: { venueId: number; tableId?: number; reference?: string; message: string }) =>
     apiClient.post('/api/orders/kitchen-note', data).then((r) => r.data),
+  getProductionStations: (venueId: number) =>
+    apiClient.get<{ data: ProductionStation[] }>('/api/orders/production-stations', { params: { venueId } }).then((r) => r.data.data),
+  getKitchenQueue: (venueId: number, stationId?: number) =>
+    apiClient.get<{ data: { items: KitchenQueueItem[]; summary: KitchenQueueSummaryItem[] } }>('/api/orders/kitchen/queue', { params: { venueId, stationId } }).then((r) => r.data.data),
+  updateProductionItemStatus: (itemId: number, status: ProductionItemStatus) =>
+    apiClient.patch(`/api/orders/production-items/${itemId}/status`, { status }).then((r) => r.data.data),
+  markKitchenReady: (orderId: number, stationId?: number) =>
+    apiClient.patch(`/api/orders/${orderId}/kitchen-ready`, { stationId }).then((r) => r.data.data),
+  getKitchenHistory: (venueId: number, stationId?: number) =>
+    apiClient.get<{ data: KitchenQueueItem[] }>('/api/orders/kitchen/history', { params: { venueId, stationId } }).then((r) => r.data.data),
+  getKitchenOrder: (orderId: number) =>
+    apiClient.get<{ data: KitchenQueueItem[] }>(`/api/orders/kitchen/order/${orderId}`).then((r) => r.data.data),
 };
 
 // ── Tickets ───────────────────────────────────────────────────────────────────
@@ -81,6 +95,24 @@ export const ticketsApi = {
   close: (data: { orderId: number; venueId: number; printerIp?: string; printerPort?: number }) =>
     apiClient.post<{ data: { ticketId: number; invoiceCode: string; total: number; qrBase64?: string } }>
       ('/api/tickets/close', data).then((r) => r.data.data),
+  closePartial: (data: {
+    originalOrderId: number;
+    venueId: number;
+    items: Array<{ productId: number; quantity: number; unitPrice: number; vatRate: number; notes?: string | null }>;
+    splitMode?: 'QUANTITY' | 'PRICE';
+    printerIp?: string;
+    printerPort?: number;
+  }) =>
+    apiClient.post<{ data: { ticketId: number; invoiceCode: string; total: number; qrBase64?: string } }>
+      ('/api/tickets/close-partial', data).then((r) => r.data.data),
+  getPreview: (ticketId: number) =>
+    apiClient.get<{ data: TicketPreviewData }>(`/api/tickets/${ticketId}/preview`).then((r) => r.data.data),
+  reprint: (ticketId: number) =>
+    apiClient.post(`/api/tickets/${ticketId}/reprint`).then((r) => r.data.data),
+  getCashSummary: (venueId: number) =>
+    apiClient.get<{ data: CashSummaryData }>('/api/tickets/cash/summary', { params: { venueId } }).then((r) => r.data.data),
+  closeCash: (data: { venueId: number; notes?: string }) =>
+    apiClient.post('/api/tickets/cash/close', data).then((r) => r.data.data),
 };
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
@@ -120,6 +152,16 @@ export const adminApi = {
   updatePrinter: (id: number, data: Partial<Printer>) => apiClient.put(`/api/admin/printers/${id}`, data).then((r) => r.data.data),
   deletePrinter: (id: number) => apiClient.delete(`/api/admin/printers/${id}`).then((r) => r.data),
 
+  // Secciones de producción
+  getProductionStations: (venueId: number) =>
+    apiClient.get<{ data: ProductionStation[] }>(`/api/admin/venues/${venueId}/production-stations`).then((r) => r.data.data),
+  createProductionStation: (venueId: number, data: Partial<ProductionStation>) =>
+    apiClient.post(`/api/admin/venues/${venueId}/production-stations`, data).then((r) => r.data.data),
+  updateProductionStation: (id: number, data: Partial<ProductionStation>) =>
+    apiClient.put(`/api/admin/production-stations/${id}`, data).then((r) => r.data.data),
+  deleteProductionStation: (id: number) =>
+    apiClient.delete(`/api/admin/production-stations/${id}`).then((r) => r.data),
+
   // Usuarios
   getUsers:      () => apiClient.get('/api/admin/users').then((r) => r.data.data),
   createUser:    (data: unknown) => apiClient.post('/api/admin/users', data).then((r) => r.data.data),
@@ -128,6 +170,8 @@ export const adminApi = {
   // Tickets
   getTickets:    (venueId: number, params?: { limit?: number; offset?: number; aeatStatus?: string }) =>
     apiClient.get(`/api/admin/venues/${venueId}/tickets`, { params }).then((r) => r.data),
+  getCashClosures: (venueId: number) =>
+    apiClient.get<{ data: CashClosure[]; totals: { billedTotal: number; ticketCount: number } }>(`/api/admin/venues/${venueId}/cash-closures`).then((r) => r.data),
 };
 
 export const printersApi = {

@@ -86,57 +86,55 @@ async function main() {
         ],
         skipDuplicates: true,
     });
-    // ── 4. Catálogo Centro ────────────────────────────────────────────────────
-    const catBebidas = await prisma.category.upsert({
-        where: { id: 1 },
-        update: {},
-        create: { venueId: venueCentro.id, name: 'Bebidas', color: '#3B82F6', icon: '🥤', sortOrder: 0 },
-    });
-    const catPrimeros = await prisma.category.upsert({
-        where: { id: 2 },
-        update: {},
-        create: { venueId: venueCentro.id, name: 'Primeros', color: '#10B981', icon: '🥗', sortOrder: 1 },
-    });
-    const catCarnes = await prisma.category.upsert({
-        where: { id: 3 },
-        update: {},
-        create: { venueId: venueCentro.id, name: 'Carnes', color: '#EF4444', icon: '🥩', sortOrder: 2 },
-    });
-    const catPostres = await prisma.category.upsert({
-        where: { id: 4 },
-        update: {},
-        create: { venueId: venueCentro.id, name: 'Postres', color: '#F59E0B', icon: '🍮', sortOrder: 3 },
-    });
-    // Productos
-    const productosData = [
-        // Bebidas
-        { venueId: venueCentro.id, name: 'Agua Mineral 50cl', price: 1.80, vatRate: 10, categoryId: catBebidas.id, sortOrder: 0 },
-        { venueId: venueCentro.id, name: 'Coca-Cola', price: 2.50, vatRate: 10, categoryId: catBebidas.id, sortOrder: 1 },
-        { venueId: venueCentro.id, name: 'Cerveza Estrella', price: 2.80, vatRate: 10, categoryId: catBebidas.id, sortOrder: 2 },
-        { venueId: venueCentro.id, name: 'Vino Tinto Copa', price: 3.50, vatRate: 10, categoryId: catBebidas.id, sortOrder: 3 },
-        { venueId: venueCentro.id, name: 'Zumo Natural Naranja', price: 3.00, vatRate: 10, categoryId: catBebidas.id, sortOrder: 4 },
-        // Primeros
-        { venueId: venueCentro.id, name: 'Ensalada Mixta', price: 6.50, vatRate: 10, categoryId: catPrimeros.id, description: 'Lechuga, tomate, zanahoria, aceitunas', sortOrder: 0 },
-        { venueId: venueCentro.id, name: 'Gazpacho Andaluz', price: 5.50, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 1 },
-        { venueId: venueCentro.id, name: 'Croquetas Caseras (6u)', price: 7.50, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 2 },
-        { venueId: venueCentro.id, name: 'Jamón Ibérico Bellota', price: 14.00, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 3 },
-        // Carnes
-        { venueId: venueCentro.id, name: 'Entrecot de Ternera', price: 18.50, vatRate: 10, categoryId: catCarnes.id, description: '250g, con patatas y pimientos del padrón', sortOrder: 0 },
-        { venueId: venueCentro.id, name: 'Secreto Ibérico a la Plancha', price: 16.00, vatRate: 10, categoryId: catCarnes.id, sortOrder: 1 },
-        { venueId: venueCentro.id, name: 'Pollo al Horno con Tomillo', price: 13.50, vatRate: 10, categoryId: catCarnes.id, sortOrder: 2 },
-        // Postres
-        { venueId: venueCentro.id, name: 'Tarta de Queso', price: 5.00, vatRate: 10, categoryId: catPostres.id, sortOrder: 0 },
-        { venueId: venueCentro.id, name: 'Crema Catalana', price: 4.50, vatRate: 10, categoryId: catPostres.id, sortOrder: 1 },
-        { venueId: venueCentro.id, name: 'Coulant de Chocolate', price: 5.50, vatRate: 10, categoryId: catPostres.id, sortOrder: 2 },
-    ];
-    for (const prod of productosData) {
-        await prisma.product.upsert({
-            where: { id: productosData.indexOf(prod) + 1 },
-            update: {},
-            create: prod,
-        });
+    async function seedVenueCatalog(venue, label) {
+        const ensureCategory = async (name, color, sortOrder) => {
+            const existing = await prisma.category.findFirst({
+                where: { venueId: venue.id, name },
+            });
+            if (existing)
+                return existing;
+            return prisma.category.create({
+                data: { venueId: venue.id, name, color, sortOrder },
+            });
+        };
+        const [catBebidas, catPrimeros, catCarnes, catPostres] = await Promise.all([
+            ensureCategory('Bebidas', '#3B82F6', 0),
+            ensureCategory('Primeros', '#10B981', 1),
+            ensureCategory('Carnes', '#EF4444', 2),
+            ensureCategory('Postres', '#F59E0B', 3),
+        ]);
+        const productosData = [
+            { venueId: venue.id, name: 'Agua Mineral 50cl', price: 1.80, vatRate: 10, categoryId: catBebidas.id, sortOrder: 0 },
+            { venueId: venue.id, name: 'Coca-Cola', price: 2.50, vatRate: 10, categoryId: catBebidas.id, sortOrder: 1 },
+            { venueId: venue.id, name: 'Cerveza Estrella', price: 2.80, vatRate: 10, categoryId: catBebidas.id, sortOrder: 2 },
+            { venueId: venue.id, name: 'Vino Tinto Copa', price: 3.50, vatRate: 10, categoryId: catBebidas.id, sortOrder: 3 },
+            { venueId: venue.id, name: 'Zumo Natural Naranja', price: 3.00, vatRate: 10, categoryId: catBebidas.id, sortOrder: 4 },
+            { venueId: venue.id, name: 'Ensalada Mixta', price: 6.50, vatRate: 10, categoryId: catPrimeros.id, description: 'Lechuga, tomate, zanahoria, aceitunas', sortOrder: 0 },
+            { venueId: venue.id, name: 'Gazpacho Andaluz', price: 5.50, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 1 },
+            { venueId: venue.id, name: 'Croquetas Caseras (6u)', price: 7.50, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 2 },
+            { venueId: venue.id, name: 'Jamón Ibérico Bellota', price: 14.00, vatRate: 10, categoryId: catPrimeros.id, sortOrder: 3 },
+            { venueId: venue.id, name: 'Entrecot de Ternera', price: 18.50, vatRate: 10, categoryId: catCarnes.id, description: '250g, con patatas y pimientos del padrón', sortOrder: 0 },
+            { venueId: venue.id, name: 'Secreto Ibérico a la Plancha', price: 16.00, vatRate: 10, categoryId: catCarnes.id, sortOrder: 1 },
+            { venueId: venue.id, name: 'Pollo al Horno con Tomillo', price: 13.50, vatRate: 10, categoryId: catCarnes.id, sortOrder: 2 },
+            { venueId: venue.id, name: 'Tarta de Queso', price: 5.00, vatRate: 10, categoryId: catPostres.id, sortOrder: 0 },
+            { venueId: venue.id, name: 'Crema Catalana', price: 4.50, vatRate: 10, categoryId: catPostres.id, sortOrder: 1 },
+            { venueId: venue.id, name: 'Coulant de Chocolate', price: 5.50, vatRate: 10, categoryId: catPostres.id, sortOrder: 2 },
+        ];
+        for (const product of productosData) {
+            const existing = await prisma.product.findFirst({
+                where: { venueId: venue.id, name: product.name },
+            });
+            if (!existing) {
+                await prisma.product.create({
+                    data: product,
+                });
+            }
+        }
+        console.log(`✅ Catálogo ${label}:`, productosData.length, 'productos');
     }
-    console.log('✅ Catálogo Centro:', productosData.length, 'productos');
+    // ── 4. Catálogos de ejemplo ─────────────────────────────────────────────
+    await seedVenueCatalog(venueCentro, 'Centro');
+    await seedVenueCatalog(venueNorte, 'Norte');
     // ── 5. Mesas Centro ───────────────────────────────────────────────────────
     const mesasCentro = [
         { number: 1, zone: 'Interior', seats: 2 },

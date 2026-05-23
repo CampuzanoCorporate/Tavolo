@@ -3,7 +3,7 @@
  * Layout de 3 columnas: Categorías | Productos | Carrito
  */
 /// <reference types="vite/client" />
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -18,6 +18,8 @@ import { KitchenNoteModal } from '../components/pos/KitchenNoteModal';
 import { MenuConfiguratorModal } from '../components/pos/MenuConfiguratorModal';
 import { MenuCoursePickerModal } from '../components/pos/MenuCoursePickerModal';
 import { MenuSendPromptModal } from '../components/pos/MenuSendPromptModal';
+import { PaymentModal } from '../components/pos/PaymentModal';
+import { SplitBillModal } from '../components/pos/SplitBillModal';
 import type { CartItem, Category, MenuCourseTag, Product } from '../types';
 import { decodeMenuSelection, getProductCourseTag, getVisibleNotes } from '../utils/menuSelection';
 import axios from 'axios';
@@ -40,6 +42,27 @@ function getCategoryAccent(category?: Category | null) {
   }
 
   return '#0F172A';
+}
+
+const FAVORITES_CATEGORY_ID = -999;
+
+function getFavoritesStorageKey(venueId: number) {
+  const today = new Date().toISOString().slice(0, 10);
+  return `tavolo-favorites-${venueId}-${today}`;
+}
+
+function readFavoriteCounts(venueId: number) {
+  try {
+    const raw = localStorage.getItem(getFavoritesStorageKey(venueId));
+    if (!raw) return {} as Record<number, number>;
+    return JSON.parse(raw) as Record<number, number>;
+  } catch {
+    return {} as Record<number, number>;
+  }
+}
+
+function storeFavoriteCounts(venueId: number, counts: Record<number, number>) {
+  localStorage.setItem(getFavoritesStorageKey(venueId), JSON.stringify(counts));
 }
 
 export function POSPage() {
@@ -68,10 +91,35 @@ export function POSPage() {
 
   const cartSummary = useCartSummary();
   const [isClosingTicket, setIsClosingTicket] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isSplitBillModalOpen, setIsSplitBillModalOpen] = useState(false);
+  const [splitBillSelection, setSplitBillSelection] = useState<Array<{
+    productId: number;
+    quantity: number;
+    notes?: string | null;
+    unitPrice: number;
+    vatRate: number;
+    name: string;
+  }> | null>(null);
+  const [splitBillMode, setSplitBillMode] = useState<'QUANTITY' | 'PRICE'>('QUANTITY');
+  const [splitPeopleTotalCount, setSplitPeopleTotalCount] = useState<number>(0);
+  const [splitPeopleRemaining, setSplitPeopleRemaining] = useState<number>(0);
+  const [lastSplitPayment, setLastSplitPayment] = useState<{
+    invoiceCode: string;
+    total: number;
+    change?: number;
+  } | null>(null);
+  const paymentTotal = useMemo(() => {
+    if (splitBillSelection) {
+      return splitBillSelection.reduce((acc, item) => acc + item.unitPrice * item.quantity, 0);
+    }
+    return Number(cartSummary.total);
+  }, [splitBillSelection, cartSummary.total]);
   const [closedTicket, setClosedTicket] = useState<{
     invoiceCode: string;
     total: number;
     qrBase64?: string;
+    isPartial?: boolean;
   } | null>(null);
   const [configuringProduct, setConfiguringProduct] = useState<Product | null>(null);
   const [configuringMenuProduct, setConfiguringMenuProduct] = useState<Product | null>(null);
@@ -84,6 +132,8 @@ export function POSPage() {
   const [menuSendPromptItems, setMenuSendPromptItems] = useState<CartItem[]>([]);
   const [isKitchenNoteModalOpen, setIsKitchenNoteModalOpen] = useState(false);
   const [isSendingKitchenNote, setIsSendingKitchenNote] = useState(false);
+  const [isOpenTablesModalOpen, setIsOpenTablesModalOpen] = useState(false);
+  const [favoriteCategory, setFavoriteCategory] = useState<Category | null>(null);
 
   // Vista activa en móvil/tablet pequeña: 'catalog' o 'ticket'
   const [mobileView, setMobileView] = useState<'catalog' | 'ticket'>('catalog');
@@ -186,10 +236,50 @@ export function POSPage() {
   }, [tableId, currentVenueId]);
 
   // ── Productos de la categoría seleccionada ───────────────────────────────
-  const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+  const displayedCategories = useMemo(() => (
+    favoriteCategory ? [favoriteCategory, ...categories] : categories
+  ), [categories, favoriteCategory]);
+
+  const selectedCategory = displayedCategories.find((c) => c.id === selectedCategoryId)
+    ?? displayedCategories.find((c) => c.id !== FAVORITES_CATEGORY_ID)
+    ?? null;
   const products: Product[] = selectedCategory?.products ?? [];
   const allCatalogProducts = categories.flatMap((category) => category.products ?? []);
   const selectedCategoryAccent = getCategoryAccent(selectedCategory);
+
+  const refreshFavoriteCategory = useCallback(() => {
+    if (!currentVenueId || categories.length === 0) return;
+    const counts = readFavoriteCounts(currentVenueId);
+    const topProducts = Object.entries(counts)
+      .map(([productId, count]) => ({
+        product: allCatalogProducts.find((item) => item.id === Number(productId)),
+        count,
+      }))
+      .filter((entry): entry is { product: Product; count: number } => Boolean(entry.product))
+      .sort((a, b) => Number(b.count) - Number(a.count))
+      .slice(0, 8)
+      .map((entry) => entry.product);
+
+    if (topProducts.length === 0) {
+      setFavoriteCategory(null);
+      return;
+    }
+
+    setFavoriteCategory({
+      id: FAVORITES_CATEGORY_ID,
+      venueId: currentVenueId,
+      name: 'Favoritos',
+      color: '#9A6B3F',
+      icon: '',
+      sortOrder: -1,
+      isActive: true,
+      products: topProducts,
+    });
+  }, [allCatalogProducts, categories, currentVenueId]);
+
+  useEffect(() => {
+    refreshFavoriteCategory();
+  }, [refreshFavoriteCategory]);
 
   // ── Añadir producto al carrito ───────────────────────────────────────────
   const addConfiguredProductToCart = async (product: Product, payload?: { price?: number; notes?: string; displayNotes?: string; modifierSummary?: string }) => {
@@ -359,7 +449,7 @@ export function POSPage() {
   };
 
   // ── Enviar comanda ────────────────────────────────────────────────────────
-  const handleSendOrder = async () => {
+  const handleSendOrder = useCallback(async () => {
     const pendingItems = cartItems.filter(i => !i.sent);
     if (pendingItems.length === 0) {
       toast.error('No hay artículos nuevos para enviar');
@@ -395,6 +485,7 @@ export function POSPage() {
           items: pendingItems.map(i => ({
             productId: i.productId,
             quantity: i.quantity,
+            unitPrice: i.price,
             notes: i.notes
           }))
         });
@@ -403,13 +494,27 @@ export function POSPage() {
       } else {
         // Agregar items al pedido existente
         for (const item of pendingItems) {
-          await ordersApi.addItem(order.id, item);
+          await ordersApi.addItem(order.id, {
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            notes: item.notes,
+          });
         }
         toast.success('Items añadidos al pedido');
       }
 
       // Enviar a cocina
       await ordersApi.sendToKitchen(order.id);
+
+      if (currentVenueId) {
+        const counts = readFavoriteCounts(currentVenueId);
+        for (const item of pendingItems) {
+          counts[item.productId] = (counts[item.productId] ?? 0) + item.quantity;
+        }
+        storeFavoriteCounts(currentVenueId, counts);
+        refreshFavoriteCategory();
+      }
       
       // Limpiar del carrito local los productos no enviados que acaban de procesarse con éxito
       useAppStore.setState({
@@ -432,38 +537,191 @@ export function POSPage() {
         toast.error('Error al enviar la comanda');
       }
     }
+  }, [activeOrder, activeTable, cartItems, currentUser?.id, currentVenueId, isOnline, loadActiveOrder, refreshFavoriteCategory, setActiveOrder, tableId]);
+
+  // ── Emitir pre-ticket / Pedir la cuenta ────────────────────────────────────
+  const handleRequestBill = async () => {
+    if (!activeTable) return;
+    try {
+      const updatedTable = await tablesApi.requestBill(activeTable.id);
+      setActiveTable(updatedTable);
+      setTables(tables.map((t) => (t.id === updatedTable.id ? updatedTable : t)));
+      toast.success('Pre-ticket emitido. Mesa en estado Cuenta.');
+    } catch (error) {
+      console.error('[POS] Error al emitir pre-ticket:', error);
+      toast.error('No se pudo emitir el pre-ticket');
+    }
   };
 
-  // ── Cerrar ticket / Cobrar ────────────────────────────────────────────────
-  const handleCloseTicket = async () => {
+  // ── Cerrar ticket / Cobrar (Abre el modal de método de pago) ────────────────
+  const handleCloseTicket = () => {
     if (!activeOrder) {
-      // Si hay items en carrito pero no pedido activo, crear primero
       if (cartItems.length === 0) {
         toast.error('No hay pedido activo');
         return;
       }
-      await handleSendOrder();
+      toast.error('Primero debes enviar a cocina antes de cobrar');
       return;
     }
+    setIsPaymentModalOpen(true);
+  };
 
+  const handleSplitBill = () => {
+    setIsSplitBillModalOpen(true);
+  };
+
+  const handleCobrarSeleccion = (selection: Array<{
+    productId: number;
+    quantity: number;
+    notes?: string | null;
+    unitPrice: number;
+    vatRate: number;
+    name: string;
+  }>, mode: 'QUANTITY' | 'PRICE', partsCount?: number) => {
+    setSplitBillSelection(selection);
+    setSplitBillMode(mode);
+
+    if (mode === 'PRICE' && partsCount) {
+      setSplitPeopleTotalCount(partsCount);
+      setSplitPeopleRemaining(partsCount);
+    } else {
+      setSplitPeopleTotalCount(0);
+      setSplitPeopleRemaining(0);
+    }
+
+    setIsSplitBillModalOpen(false);
+    setIsPaymentModalOpen(true);
+  };
+
+  const handleCobrarSiguienteParte = async () => {
+    setClosedTicket(null); // Cerrar pantalla de éxito del ticket anterior
+
+    if (splitPeopleRemaining <= 1) {
+      // Última persona: paga el importe restante de la comanda normal
+      setSplitBillSelection(null);
+      setIsPaymentModalOpen(true);
+    } else {
+      // Comensal intermedio: paga 1 / splitPeopleRemaining de lo que queda de comanda
+      const activeItems = useAppStore.getState().cartItems.filter((i) => i.sent);
+      const nextSelection = activeItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        notes: item.notes || null,
+        unitPrice: Number(item.price) / splitPeopleRemaining,
+        vatRate: Number(item.vatRate),
+        name: item.name,
+      }));
+
+      setSplitBillSelection(nextSelection);
+      setSplitBillMode('PRICE');
+      setIsPaymentModalOpen(true);
+    }
+  };
+
+  const handleConfirmPayment = async (method: 'CASH' | 'CARD', print: boolean, cashDetails?: { delivered: number; change: number }) => {
+    if (!activeOrder) return;
     setIsClosingTicket(true);
 
     try {
-      const result = await ticketsApi.close({
-        orderId: activeOrder.id,
-        venueId: currentVenueId!,
-        printerIp: selectedPrinterIp || undefined,
-      });
+      let result;
+      if (splitBillSelection) {
+        result = await ticketsApi.closePartial({
+          originalOrderId: activeOrder.id,
+          venueId: currentVenueId!,
+          items: splitBillSelection.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            vatRate: item.vatRate,
+            notes: item.notes,
+          })),
+          splitMode: splitBillMode,
+          printerIp: print ? (selectedPrinterIp || undefined) : undefined,
+        });
+      } else {
+        result = await ticketsApi.close({
+          orderId: activeOrder.id,
+          venueId: currentVenueId!,
+          printerIp: print ? (selectedPrinterIp || undefined) : undefined,
+        });
+      }
 
-      setClosedTicket({
-        invoiceCode: result.invoiceCode,
-        total: result.total,
-        qrBase64: result.qrBase64,
-      });
+      const methodLabel = method === 'CASH' ? 'Efectivo' : 'Tarjeta';
+      let msg = `Ticket ${result.invoiceCode} cobrado (${methodLabel})`;
+      if (method === 'CASH' && cashDetails) {
+        msg += ` - Cambio: ${cashDetails.change.toFixed(2)} €`;
+      }
+      toast.success(msg, { duration: 6000 });
 
-      clearCart();
-      setActiveOrder(null);
-      toast.success(`Ticket ${result.invoiceCode} emitido`);
+      // Verificación de flujo consecutivo en división por personas (PRICE)
+      if (splitBillSelection && splitBillMode === 'PRICE') {
+        const nextRemaining = splitPeopleRemaining - 1;
+        setSplitPeopleRemaining(nextRemaining);
+
+        if (nextRemaining > 0) {
+          // Aún quedan personas por pagar
+          setLastSplitPayment({
+            invoiceCode: result.invoiceCode,
+            total: result.total,
+            change: method === 'CASH' && cashDetails ? cashDetails.change : undefined,
+          });
+
+          // Limpiar la selección anterior y cargar el estado actualizado
+          setSplitBillSelection(null);
+          await loadActiveOrder();
+
+          if (nextRemaining === 1) {
+            // Último comensal: paga el resto en cierre estándar
+            setSplitBillSelection(null);
+          } else {
+            // Comensal intermedio: recalculamos con el precio restante
+            const activeItems = useAppStore.getState().cartItems.filter((i) => i.sent);
+            const nextSelection = activeItems.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              notes: item.notes || null,
+              unitPrice: Number(item.price) / nextRemaining,
+              vatRate: Number(item.vatRate),
+              name: item.name,
+            }));
+            setSplitBillSelection(nextSelection);
+          }
+        } else {
+          // Último comensal pagado
+          clearCart();
+          setActiveOrder(null);
+          setSplitPeopleRemaining(0);
+          setSplitPeopleTotalCount(0);
+          setLastSplitPayment(null);
+          setIsPaymentModalOpen(false);
+
+          setClosedTicket({
+            invoiceCode: result.invoiceCode,
+            total: result.total,
+            qrBase64: result.qrBase64,
+            isPartial: false,
+          });
+        }
+      } else {
+        // Cierre estándar o división por artículos
+        setClosedTicket({
+          invoiceCode: result.invoiceCode,
+          total: result.total,
+          qrBase64: result.qrBase64,
+          isPartial: !!splitBillSelection,
+        });
+
+        if (splitBillSelection) {
+          setSplitBillSelection(null);
+          await loadActiveOrder();
+        } else {
+          clearCart();
+          setActiveOrder(null);
+          setSplitPeopleRemaining(0);
+          setSplitPeopleTotalCount(0);
+        }
+        setIsPaymentModalOpen(false);
+      }
     } catch (error) {
       console.error('[POS] Error cerrando ticket:', error);
       if (axios.isAxiosError(error) && typeof error.response?.data?.message === 'string') {
@@ -503,16 +761,35 @@ export function POSPage() {
             Veri*factu — verificable en sede.agenciatributaria.gob.es
           </p>
 
-          <button
-            id="btn-new-order"
-            className="btn btn-primary btn-full"
-            onClick={() => {
-              setClosedTicket(null);
-              navigate('/');
-            }}
-          >
-            Nueva Mesa
-          </button>
+          {closedTicket.isPartial ? (
+            <button
+              id="btn-continue-table"
+              className="btn btn-primary btn-full"
+              onClick={
+                splitPeopleRemaining > 0
+                  ? handleCobrarSiguienteParte
+                  : () => setClosedTicket(null)
+              }
+              style={{ fontWeight: 800 }}
+            >
+              {splitPeopleRemaining > 0
+                ? splitPeopleRemaining === 1
+                  ? `Cobrar Última Parte (Persona ${splitPeopleTotalCount - splitPeopleRemaining + 1} de ${splitPeopleTotalCount})`
+                  : `Cobrar Siguiente Parte (Persona ${splitPeopleTotalCount - splitPeopleRemaining + 1} de ${splitPeopleTotalCount})`
+                : `Continuar cobrando Mesa ${activeTable?.number ?? 0}`}
+            </button>
+          ) : (
+            <button
+              id="btn-new-order"
+              className="btn btn-primary btn-full"
+              onClick={() => {
+                setClosedTicket(null);
+                navigate('/');
+              }}
+            >
+              Nueva Mesa
+            </button>
+          )}
         </div>
       </div>
     );
@@ -544,6 +821,8 @@ export function POSPage() {
         summary={cartSummary}
         onSendOrder={handleSendOrder}
         onCloseTicket={handleCloseTicket}
+        onRequestBill={handleRequestBill}
+        onSplitBill={handleSplitBill}
         isClosingTicket={isClosingTicket}
         hasActiveOrder={!!activeOrder || !!activeTable}
         onCancelSentItem={handleCancelSentItem}
@@ -559,14 +838,23 @@ export function POSPage() {
         >
           <div className="product-area__header">
             <div className="product-area__table-info">
-              <span className="product-area__table-badge">
-                Mesa {activeTable?.number ?? tableId}
-              </span>
-              {activeOrder && (
-                <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                  Pedido #{activeOrder.id} activo
+              <span className="product-area__eyebrow">Servicio en curso</span>
+              <div className="product-area__table-line">
+                <span className="product-area__table-badge">
+                  Mesa {activeTable?.number ?? tableId}
                 </span>
-              )}
+                {activeTable?.zone && (
+                  <span className="product-area__zone-pill">{activeTable.zone}</span>
+                )}
+                {activeOrder && (
+                  <span className="product-area__order-pill">
+                    Pedido #{activeOrder.id}
+                  </span>
+                )}
+              </div>
+              <p className="product-area__subtitle">
+                Selecciona una categoría y añade artículos al ticket.
+              </p>
             </div>
 
             <div className="product-area__actions">
@@ -587,6 +875,14 @@ export function POSPage() {
                 Avisar a cocina
               </button>
               <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setIsOpenTablesModalOpen(true)}
+                style={{ fontSize: '0.85rem' }}
+              >
+                Mesas abiertas
+              </button>
+              <button
                 id="btn-back-tables"
                 className="btn btn-ghost"
                 onClick={() => navigate('/')}
@@ -594,19 +890,23 @@ export function POSPage() {
               >
                 Volver a mesas
               </button>
+              <span className="product-area__hint-badge">
+                {selectedCategory?.name ?? 'Categoría'}
+              </span>
             </div>
           </div>
 
           <ProductGrid
             products={products}
             accentColor={selectedCategoryAccent}
+            categoryName={selectedCategory?.name}
             onProductClick={handleProductClick}
           />
         </div>
 
         {/* Columna 3: Sidebar de categorías */}
         <CategorySidebar
-          categories={categories}
+          categories={displayedCategories}
           selectedId={selectedCategoryId}
           onSelect={setSelectedCategoryId}
           getCategoryAccent={getCategoryAccent}
@@ -669,6 +969,76 @@ export function POSPage() {
           isSubmitting={isSendingKitchenNote}
           onClose={() => setIsKitchenNoteModalOpen(false)}
           onSubmit={handleSendKitchenNote}
+        />
+      )}
+
+      {isOpenTablesModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsOpenTablesModalOpen(false)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3 className="modal__title">Mesas abiertas</h3>
+            <div className="pos-open-tables-list">
+              {tables.filter((table) => table.objectType === 'TABLE' && table.status !== 'FREE').length === 0 ? (
+                <div className="admin-modifier-empty">No hay mesas abiertas ahora mismo.</div>
+              ) : (
+                tables
+                  .filter((table) => table.objectType === 'TABLE' && table.status !== 'FREE')
+                  .sort((a, b) => a.number - b.number)
+                  .map((table) => (
+                    <button
+                      key={table.id}
+                      className="pos-open-tables-list__item"
+                      onClick={() => {
+                        setIsOpenTablesModalOpen(false);
+                        setActiveTable(table);
+                        navigate(`/pos/${table.id}`);
+                      }}
+                    >
+                      <strong>Mesa {table.number}</strong>
+                      <span>{table.name ?? 'Sala'}</span>
+                    </button>
+                  ))
+              )}
+            </div>
+            <div className="modal__actions">
+              <button className="btn btn-secondary" onClick={() => setIsOpenTablesModalOpen(false)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSplitBillModalOpen && (
+        <SplitBillModal
+          isOpen={isSplitBillModalOpen}
+          onClose={() => setIsSplitBillModalOpen(false)}
+          tableNumber={activeTable?.number ?? 0}
+          sentItems={cartSummary.items.filter((i) => i.sent)}
+          onCobrarSeleccion={handleCobrarSeleccion}
+        />
+      )}
+
+      {isPaymentModalOpen && (
+        <PaymentModal
+          key={`payment-table-${activeTable?.id}-person-${splitPeopleTotalCount - splitPeopleRemaining + 1}`}
+          total={paymentTotal}
+          tableNumber={activeTable?.number ?? 0}
+          isClosing={isClosingTicket}
+          onClose={() => {
+            setIsPaymentModalOpen(false);
+            setSplitBillSelection(null);
+            setLastSplitPayment(null);
+          }}
+          onConfirm={handleConfirmPayment}
+          splitInfo={
+            splitPeopleTotalCount > 0
+              ? {
+                  current: splitPeopleTotalCount - splitPeopleRemaining + 1,
+                  total: splitPeopleTotalCount,
+                }
+              : undefined
+          }
+          lastPayment={lastSplitPayment}
         />
       )}
     </div>

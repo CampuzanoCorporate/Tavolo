@@ -3,8 +3,9 @@
  */
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { adminApi } from '../../services/api';
+import { adminApi, ticketsApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
+import type { CashClosure, TicketPreviewData } from '../../types';
 
 interface TicketListItem {
   id: number;
@@ -14,6 +15,7 @@ interface TicketListItem {
   invoiceDate: string;
   total: number;
   vatTotal: number;
+  vatAmount?: number | string | null;
   businessName: string;
   businessNif: string;
   businessAddress: string;
@@ -33,10 +35,21 @@ export function TicketsLogPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [selectedTicket, setSelectedTicket] = useState<TicketListItem | null>(null);
+  const [billedTotal, setBilledTotal] = useState(0);
+  const [ticketPreview, setTicketPreview] = useState<TicketPreviewData | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [reprintingTicketId, setReprintingTicketId] = useState<number | null>(null);
+  const [closures, setClosures] = useState<CashClosure[]>([]);
+  const [closuresTotal, setClosuresTotal] = useState(0);
 
   // Pagination
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  const parseAmount = (value: number | string | null | undefined) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
   const loadTickets = async () => {
     if (!currentVenueId) return;
@@ -47,8 +60,24 @@ export function TicketsLogPage() {
         offset: (page - 1) * limit,
         aeatStatus: statusFilter || undefined,
       });
-      setTickets(res.data);
+      setTickets(
+        res.data.map((ticket: TicketListItem & { vatAmount?: number | string | null }) => ({
+          ...ticket,
+          total: parseAmount(ticket.total),
+          vatTotal: parseAmount(ticket.vatTotal ?? ticket.vatAmount),
+        })),
+      );
       setTotal(res.total);
+      setBilledTotal(Number(res.billedTotal ?? 0));
+      try {
+        const closuresRes = await adminApi.getCashClosures(currentVenueId);
+        setClosures(closuresRes.data);
+        setClosuresTotal(Number(closuresRes.totals.billedTotal ?? 0));
+      } catch (error) {
+        console.error('[Tickets] Error cargando cierres:', error);
+        setClosures([]);
+        setClosuresTotal(0);
+      }
     } catch {
       toast.error('Error cargando registro de facturas');
     } finally {
@@ -65,6 +94,35 @@ export function TicketsLogPage() {
     setPage(1);
   };
 
+  const handleOpenTicket = async (ticket: TicketListItem) => {
+    try {
+      setSelectedTicket(ticket);
+      setLoadingPreview(true);
+      const preview = await ticketsApi.getPreview(ticket.id);
+      setTicketPreview(preview);
+    } catch (error) {
+      console.error('[Tickets] Error cargando preview:', error);
+      toast.error('No se pudo abrir el ticket');
+      setSelectedTicket(null);
+      setTicketPreview(null);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleReprint = async (ticketId: number) => {
+    try {
+      setReprintingTicketId(ticketId);
+      await ticketsApi.reprint(ticketId);
+      toast.success('Ticket enviado a impresión');
+    } catch (error) {
+      console.error('[Tickets] Error reimprimiendo ticket:', error);
+      toast.error('No se pudo reimprimir el ticket');
+    } finally {
+      setReprintingTicketId(null);
+    }
+  };
+
   const getStatusBadge = (status: TicketListItem['aeatStatus']) => {
     switch (status) {
       case 'ACCEPTED':
@@ -79,6 +137,10 @@ export function TicketsLogPage() {
     }
   };
 
+  const selectedTicketTotal = parseAmount(selectedTicket?.total);
+  const selectedTicketVat = parseAmount(selectedTicket?.vatTotal ?? selectedTicket?.vatAmount);
+  const selectedTicketBase = Math.max(0, selectedTicketTotal - selectedTicketVat);
+
   if (!currentVenueId) {
     return (
       <div className="admin-page">
@@ -91,8 +153,8 @@ export function TicketsLogPage() {
     <div className="admin-page">
       <div className="admin-page-header">
         <div>
-          <h1 className="admin-page-title">Registro de Facturas (Veri*factu)</h1>
-          <p className="admin-page-subtitle">Listado oficial e inmutable de facturas expedidas en este local</p>
+          <h1 className="admin-page-title">Histórico de facturación y cierres</h1>
+          <p className="admin-page-subtitle">Consulta el histórico facturado y los cierres de caja registrados en esta sede</p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <select
@@ -114,11 +176,26 @@ export function TicketsLogPage() {
         <div className="admin-loading">Cargando facturas...</div>
       ) : (
         <section className="admin-section">
+          <div className="admin-summary-grid" style={{ marginBottom: 'var(--space-4)' }}>
+            <article className="admin-summary-card">
+              <span className="admin-summary-card__label">Total facturado</span>
+              <strong className="admin-summary-card__value">{billedTotal.toFixed(2)} €</strong>
+            </article>
+            <article className="admin-summary-card">
+              <span className="admin-summary-card__label">Movimientos</span>
+              <strong className="admin-summary-card__value">{total}</strong>
+            </article>
+            <article className="admin-summary-card">
+              <span className="admin-summary-card__label">Total en cierres</span>
+              <strong className="admin-summary-card__value">{closuresTotal.toFixed(2)} €</strong>
+            </article>
+          </div>
+
           <div className="admin-table-wrapper" style={{ overflowX: 'auto' }}>
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Factura</th>
+                  <th>Movimiento</th>
                   <th>Fecha/Hora</th>
                   <th>Emisor</th>
                   <th>Importe Total</th>
@@ -160,9 +237,9 @@ export function TicketsLogPage() {
                         <button
                           id={`btn-view-ticket-${t.id}`}
                           className="btn btn-secondary btn-sm"
-                          onClick={() => setSelectedTicket(t)}
+                          onClick={() => void handleOpenTicket(t)}
                         >
-                          👁 Detalles
+                          Ver ticket
                         </button>
                       </td>
                     </tr>
@@ -199,16 +276,76 @@ export function TicketsLogPage() {
         </section>
       )}
 
+      <section className="admin-section" style={{ marginTop: 'var(--space-6)' }}>
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <h2 className="admin-section-title">Histórico de cierres de caja</h2>
+        </div>
+        <div className="admin-table-wrapper" style={{ overflowX: 'auto' }}>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Fecha cierre</th>
+                <th>Periodo</th>
+                <th>Responsable</th>
+                <th>Tickets</th>
+                <th>Total cerrado</th>
+                <th>Notas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {closures.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
+                    No hay cierres registrados todavía.
+                  </td>
+                </tr>
+              ) : (
+                closures.map((closure) => (
+                  <tr key={closure.id}>
+                    <td>{new Date(closure.createdAt).toLocaleString('es-ES')}</td>
+                    <td style={{ fontSize: '0.8rem' }}>
+                      {new Date(closure.periodStart).toLocaleString('es-ES')}
+                      <br />
+                      {new Date(closure.periodEnd).toLocaleString('es-ES')}
+                    </td>
+                    <td>{closure.user.name}</td>
+                    <td>{closure.ticketCount}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--color-accent)' }}>
+                      {Number(closure.billedTotal).toFixed(2)} €
+                    </td>
+                    <td style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                      {closure.notes || 'Sin notas'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Ticket Details Modal */}
       {selectedTicket && (
         <div className="modal-backdrop" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="modal-content" style={{ maxWidth: 550, width: '100%' }}>
+          <div className="modal-content" style={{ maxWidth: 780, width: '100%' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Detalles de Factura: {selectedTicket.invoiceCode}</h3>
-              <button className="modal-close" onClick={() => setSelectedTicket(null)}>×</button>
+              <h3 className="modal-title">Movimiento: {selectedTicket.invoiceCode}</h3>
+              <button className="modal-close" onClick={() => {
+                setSelectedTicket(null);
+                setTicketPreview(null);
+              }}>×</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
+              {loadingPreview ? (
+                <div className="admin-loading">Abriendo ticket...</div>
+              ) : ticketPreview && (
+                <div className="print-preview">
+                  <div className="print-preview__paper" style={{ whiteSpace: 'pre-wrap' }}>
+                    {ticketPreview.preview}
+                  </div>
+                </div>
+              )}
               
               {/* Información General */}
               <div className="admin-venue-card" style={{ padding: 'var(--space-3)' }}>
@@ -225,13 +362,13 @@ export function TicketsLogPage() {
               {/* Importes */}
               <div className="admin-venue-card" style={{ padding: 'var(--space-3)' }}>
                 <h4 style={{ fontWeight: 700, borderBottom: '1px solid var(--color-border)', paddingBottom: 6, marginBottom: 8 }}>
-                  💰 Importes y Tasas
+                  Importes y tasas
                 </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: '0.85rem' }}>
-                  <div><strong>Base Imponible:</strong> {(Number(selectedTicket.total) - Number(selectedTicket.vatTotal)).toFixed(2)} €</div>
-                  <div><strong>Cuota IVA (10%):</strong> {Number(selectedTicket.vatTotal).toFixed(2)} €</div>
+                  <div><strong>Base Imponible:</strong> {selectedTicketBase.toFixed(2)} €</div>
+                  <div><strong>Cuota IVA (10%):</strong> {selectedTicketVat.toFixed(2)} €</div>
                   <div style={{ gridColumn: 'span 2', fontSize: '1rem', fontWeight: 'bold', borderTop: '1px solid var(--color-border)', paddingTop: 6, marginTop: 4 }}>
-                    Total Factura: <span style={{ color: 'var(--color-accent)' }}>{Number(selectedTicket.total).toFixed(2)} €</span>
+                    Total Factura: <span style={{ color: 'var(--color-accent)' }}>{selectedTicketTotal.toFixed(2)} €</span>
                   </div>
                 </div>
               </div>
@@ -239,7 +376,7 @@ export function TicketsLogPage() {
               {/* Trazabilidad Fiscal */}
               <div className="admin-venue-card" style={{ padding: 'var(--space-3)' }}>
                 <h4 style={{ fontWeight: 700, borderBottom: '1px solid var(--color-border)', paddingBottom: 6, marginBottom: 8 }}>
-                  ⚡ Integridad Fiscal (Veri*factu Encadenado)
+                  Integridad fiscal (Veri*factu)
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.78rem' }}>
                   <div>
@@ -266,7 +403,7 @@ export function TicketsLogPage() {
                     style={{ width: 100, height: 100, background: 'white', padding: 4, borderRadius: 6 }}
                   />
                   <div style={{ flex: 1 }}>
-                    <h5 style={{ fontWeight: 700, marginBottom: 4 }}>📱 Código QR Oficial</h5>
+                    <h5 style={{ fontWeight: 700, marginBottom: 4 }}>Código QR oficial</h5>
                     <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
                       Este código QR permite al cliente final o al inspector fiscal verificar el registro inmediato e inalterable de esta factura directamente en el sistema de la AEAT.
                     </p>
@@ -277,7 +414,7 @@ export function TicketsLogPage() {
               {/* Respuesta AEAT */}
               <div className="admin-venue-card" style={{ padding: 'var(--space-3)' }}>
                 <h4 style={{ fontWeight: 700, borderBottom: '1px solid var(--color-border)', paddingBottom: 6, marginBottom: 8 }}>
-                  🖥️ Estado de Envío AEAT
+                  Estado de envío AEAT
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85rem' }}>
                   <div><strong>Estado:</strong> {getStatusBadge(selectedTicket.aeatStatus)}</div>
@@ -292,8 +429,18 @@ export function TicketsLogPage() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
-                <button className="btn btn-secondary" onClick={() => setSelectedTicket(null)}>Cerrar</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void handleReprint(selectedTicket.id)}
+                  disabled={reprintingTicketId === selectedTicket.id}
+                >
+                  {reprintingTicketId === selectedTicket.id ? 'Imprimiendo...' : 'Reimprimir'}
+                </button>
+                <button className="btn btn-secondary" onClick={() => {
+                  setSelectedTicket(null);
+                  setTicketPreview(null);
+                }}>Cerrar</button>
               </div>
             </div>
           </div>

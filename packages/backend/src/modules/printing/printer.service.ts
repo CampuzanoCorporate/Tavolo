@@ -302,6 +302,26 @@ export function buildCommandaBuffer(data: PrintCommandaData): Buffer {
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 32) => text(char.repeat(length));
   const pad = (n: number) => String(n).padStart(2, '0');
+  const wrapText = (value: string, lineLength: number) => {
+    const cleaned = value.trim().replace(/\s+/g, ' ');
+    if (!cleaned) return [];
+    const words = cleaned.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= lineLength) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+
+    if (current) lines.push(current);
+    return lines;
+  };
 
   parts.push(ESCPOS.INIT);
   parts.push(ESCPOS.ALIGN_CENTER);
@@ -321,10 +341,18 @@ export function buildCommandaBuffer(data: PrintCommandaData): Buffer {
     parts.push(text(`${item.quantity}x ${item.name.substring(0, 16)}`), nl);
     parts.push(ESCPOS.DOUBLE_SIZE_OFF, ESCPOS.BOLD_OFF);
     if (item.description) {
-      parts.push(text(`   - ${item.description.substring(0, 26)}`), nl);
+      parts.push(ESCPOS.BOLD_ON);
+      for (const descriptionLine of wrapText(item.description, 28)) {
+        parts.push(text(` ING: ${descriptionLine}`), nl);
+      }
+      parts.push(ESCPOS.BOLD_OFF);
     }
     if (item.notes) {
-      parts.push(text(`   *** ${item.notes.substring(0, 24)} ***`), nl);
+      parts.push(ESCPOS.BOLD_ON, ESCPOS.DOUBLE_SIZE_ON);
+      for (const noteLine of wrapText(item.notes, 14)) {
+        parts.push(text(noteLine), nl);
+      }
+      parts.push(ESCPOS.DOUBLE_SIZE_OFF, ESCPOS.BOLD_OFF);
     }
   }
 
@@ -338,6 +366,26 @@ export function buildCommandaBuffer(data: PrintCommandaData): Buffer {
 export function buildCommandaPreviewText(data: PrintCommandaData): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const hora = `${pad(data.orderTime.getHours())}:${pad(data.orderTime.getMinutes())}`;
+  const wrapText = (value: string, lineLength: number) => {
+    const cleaned = value.trim().replace(/\s+/g, ' ');
+    if (!cleaned) return [];
+    const words = cleaned.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= lineLength) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+
+    if (current) lines.push(current);
+    return lines;
+  };
   const lines = [
     data.isCancellation ? '*** CANCELACION ***' : '',
     `MESA ${data.tableNumber}`,
@@ -347,8 +395,12 @@ export function buildCommandaPreviewText(data: PrintCommandaData): string {
 
   for (const item of data.items) {
     lines.push(`${item.quantity}x ${item.name}`);
-    if (item.description) lines.push(`   - ${item.description}`);
-    if (item.notes) lines.push(`   *** ${item.notes} ***`);
+    if (item.description) {
+      wrapText(item.description, 28).forEach((line) => lines.push(` ING: ${line}`));
+    }
+    if (item.notes) {
+      wrapText(item.notes, 18).forEach((line) => lines.push(` >>> ${line}`));
+    }
   }
 
   lines.push('================================');

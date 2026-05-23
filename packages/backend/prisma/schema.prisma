@@ -52,9 +52,11 @@ model Venue {
 
   tables     Table[]
   printers   Printer[]
+  productionStations ProductionStation[]
   categories Category[]
   orders     Order[]
   tickets    Ticket[]
+  cashClosures CashClosure[]
   venueUsers VenueUser[]
   products   Product[]
 
@@ -77,6 +79,7 @@ model User {
 
   orders     Order[]
   tickets    Ticket[]
+  cashClosures CashClosure[]
   venueUsers VenueUser[]
 
   @@index([email])
@@ -150,8 +153,11 @@ model Category {
 
   products       Product[]
   modifierGroups ModifierGroup[]
+  preparationStationId Int?
+  preparationStation   ProductionStation? @relation(fields: [preparationStationId], references: [id])
 
   @@index([venueId, isActive])
+  @@index([preparationStationId])
   @@map("categories")
 }
 
@@ -200,11 +206,14 @@ model Product {
   isAvailable Boolean  @default(true)
   imagePath   String?  @db.VarChar(255)
   sortOrder   Int      @default(0)
+  preparationStationId Int?
+  preparationStation   ProductionStation? @relation(fields: [preparationStationId], references: [id])
 
   orderItems OrderItem[]
 
   @@index([venueId, categoryId])
   @@index([venueId, isAvailable])
+  @@index([preparationStationId])
   @@map("products")
 }
 
@@ -231,6 +240,7 @@ model Order {
   updatedAt DateTime    @updatedAt
 
   items  OrderItem[]
+  productionItems ProductionItem[]
   ticket Ticket?
 
   @@index([venueId, tableId, status])
@@ -258,9 +268,74 @@ model OrderItem {
   unitPrice Decimal @db.Decimal(10, 2)
   vatRate   Decimal @db.Decimal(5, 2)
   notes     String? @db.VarChar(500)
+  productionItems ProductionItem[]
 
   @@index([orderId])
   @@map("order_items")
+}
+
+model ProductionStation {
+  id        Int      @id @default(autoincrement())
+  venueId    Int
+  venue      Venue    @relation(fields: [venueId], references: [id])
+  name       String   @db.VarChar(100)
+  code       String?  @db.VarChar(40)
+  printerId  Int?
+  printer    Printer? @relation(fields: [printerId], references: [id])
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  categories Category[]
+  products   Product[]
+  items      ProductionItem[]
+
+  @@index([venueId, isActive])
+  @@map("production_stations")
+}
+
+model ProductionItem {
+  id              Int                  @id @default(autoincrement())
+  orderId         Int
+  order           Order                @relation(fields: [orderId], references: [id])
+  orderItemId     Int?
+  orderItem       OrderItem?           @relation(fields: [orderItemId], references: [id])
+  stationId       Int?
+  station         ProductionStation?   @relation(fields: [stationId], references: [id])
+  sourceType      ProductionSourceType @default(ORDER_ITEM)
+  sourceKey       String               @unique @db.VarChar(120)
+  productName     String               @db.VarChar(200)
+  quantity        Int                  @default(1)
+  description     String?              @db.Text
+  notes           String?              @db.VarChar(500)
+  courseTag       String?              @db.VarChar(20)
+  sourceMenuName  String?              @db.VarChar(200)
+  status          ProductionItemStatus @default(PENDING)
+  sentAt          DateTime             @default(now())
+  readyAt         DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([orderId, status])
+  @@index([stationId, status])
+  @@index([orderItemId])
+  @@map("production_items")
+}
+
+enum ProductionItemStatus {
+  PENDING
+  IN_PROGRESS
+  READY
+
+  @@map("production_item_status")
+}
+
+enum ProductionSourceType {
+  ORDER_ITEM
+  MENU_COURSE
+
+  @@map("production_source_type")
 }
 
 // ─── MÓDULO FISCAL — VERI*FACTU ────────────────────────────────────────────
@@ -303,6 +378,24 @@ model Ticket {
   @@map("tickets")
 }
 
+model CashClosure {
+  id          Int      @id @default(autoincrement())
+  venueId      Int
+  venue        Venue    @relation(fields: [venueId], references: [id])
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id])
+  periodStart  DateTime
+  periodEnd    DateTime
+  ticketCount  Int      @default(0)
+  billedTotal  Decimal  @db.Decimal(10, 2)
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  @@index([venueId, periodEnd])
+  @@index([userId, createdAt])
+  @@map("cash_closures")
+}
+
 enum AeatStatus {
   PENDING
   SENT
@@ -324,6 +417,7 @@ model Printer {
   port      Int         @default(9100)
   type      PrinterType @default(RECEIPT)
   isActive  Boolean     @default(true)
+  productionStations ProductionStation[]
 
   @@index([venueId, type, isActive])
   @@map("printers")

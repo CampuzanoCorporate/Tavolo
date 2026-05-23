@@ -1,6 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.closeTicket = closeTicket;
+exports.closePartialTicket = closePartialTicket;
+exports.getTicketPreview = getTicketPreview;
+exports.reprintTicket = reprintTicket;
+exports.getCashSummary = getCashSummary;
+exports.closeCashRegister = closeCashRegister;
 /**
  * ============================================================
  * MÓDULO TICKETS — Servicio de Cierre (v2 Multi-sede)
@@ -18,6 +23,32 @@ const qr_service_1 = require("../verifactu/qr.service");
 const printer_service_1 = require("../printing/printer.service");
 const config_1 = require("../../config");
 const menuSelection_1 = require("../orders/menuSelection");
+function isMissingCashClosuresTable(error) {
+    return error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
+}
+function buildPrintableTicketPayload(ticket, order) {
+    const dominantVatRate = parseFloat(order.items[0]?.vatRate.toString() ?? '10');
+    return {
+        businessName: ticket.businessName,
+        businessNif: ticket.businessNif,
+        businessAddress: ticket.businessAddress,
+        invoiceCode: ticket.invoiceCode,
+        issuedAt: ticket.issuedAt,
+        tableNumber: order.table.number,
+        waiterName: order.user.name,
+        items: order.items.map((item) => ({
+            name: item.product.name,
+            quantity: item.quantity,
+            unitPrice: parseFloat(item.unitPrice.toString()),
+            notes: (0, menuSelection_1.getVisibleNotes)(item.notes),
+        })),
+        subtotal: parseFloat(ticket.subtotal.toString()),
+        vatAmount: parseFloat(ticket.vatAmount.toString()),
+        vatRate: dominantVatRate,
+        total: parseFloat(ticket.total.toString()),
+        qrBase64: ticket.qrBase64 ?? undefined,
+    };
+}
 async function closeTicket(input) {
     const { orderId, userId, venueId, printerIp, printerPort = 9100 } = input;
     // ── 1. Cargar pedido con items ────────────────────────────────────────────
@@ -161,5 +192,244 @@ async function closeTicket(input) {
         }
     }
     return { ticketId: ticket.id, invoiceCode: ticket.invoiceCode, total, qrBase64 };
+}
+async function closePartialTicket(input) {
+    const { originalOrderId, userId, venueId, items, splitMode = 'QUANTITY', printerIp, printerPort = 9100 } = input;
+    // 1. Cargar el pedido original
+    const originalOrder = await client_2.prisma.order.findUnique({
+        where: { id: originalOrderId },
+        include: {
+            items: true,
+            table: true,
+        },
+    });
+    if (!originalOrder)
+        throw new Error(`Pedido #${originalOrderId} no encontrado`);
+    if (originalOrder.venueId !== venueId)
+        throw new Error(`El pedido #${originalOrderId} no pertenece a esta sede`);
+    if (originalOrder.status === client_1.OrderStatus.CLOSED || originalOrder.status === client_1.OrderStatus.CANCELLED) {
+        throw new Error(`El pedido #${originalOrderId} ya está cerrado o cancelado`);
+    }
+    // 2. Realizar la separación en una transacción atómica de Prisma
+    const partialOrder = await client_2.prisma.$transaction(async (tx) => {
+        // a. Descontar las cantidades o precios del pedido original
+        for (const selectedItem of items) {
+            const originalItem = originalOrder.items.find((oi) => oi.productId === selectedItem.productId && oi.notes === (selectedItem.notes || null));
+            if (!originalItem) {
+                throw new Error(`El producto #${selectedItem.productId} no está en la comanda original con las mismas notas`);
+            }
+            if (splitMode === 'PRICE') {
+                const remainingPrice = Number(originalItem.unitPrice) - selectedItem.unitPrice;
+                if (remainingPrice <= 0.01) {
+                    // Si el precio restante es insignificante, eliminar la línea completa
+                    await tx.orderItem.delete({
+                        where: { id: originalItem.id },
+                    });
+                }
+                else {
+                    // Descontar el precio del artículo comanda original
+                    await tx.orderItem.update({
+                        where: { id: originalItem.id },
+                        data: { unitPrice: new client_1.Prisma.Decimal(remainingPrice) },
+                    });
+                }
+            }
+            else {
+                if (selectedItem.quantity > originalItem.quantity) {
+                    throw new Error(`La cantidad a separar (${selectedItem.quantity}) es mayor que la existente (${originalItem.quantity}) para el producto #${selectedItem.productId}`);
+                }
+                const remainingQty = originalItem.quantity - selectedItem.quantity;
+                if (remainingQty <= 0) {
+                    // Eliminar la línea completa
+                    await tx.orderItem.delete({
+                        where: { id: originalItem.id },
+                    });
+                }
+                else {
+                    // Actualizar la cantidad
+                    await tx.orderItem.update({
+                        where: { id: originalItem.id },
+                        data: { quantity: remainingQty },
+                    });
+                }
+            }
+        }
+        // b. Crear un nuevo pedido temporal para cobrar
+        const newOrder = await tx.order.create({
+            data: {
+                venueId,
+                tableId: originalOrder.tableId,
+                userId,
+                status: client_1.OrderStatus.OPEN,
+                items: {
+                    create: items.map((item) => ({
+                        productId: item.productId,
+                        quantity: item.quantity,
+                        unitPrice: new client_1.Prisma.Decimal(item.unitPrice),
+                        vatRate: new client_1.Prisma.Decimal(item.vatRate),
+                        notes: item.notes || null,
+                    })),
+                },
+            },
+        });
+        return newOrder;
+    });
+    // 3. Invocar closeTicket oficial en el nuevo pedido temporal
+    const result = await closeTicket({
+        orderId: partialOrder.id,
+        userId,
+        venueId,
+        printerIp,
+        printerPort,
+    });
+    // 4. Si el pedido original aún conserva algún artículo, restaurar el estado de la mesa a Cuenta (BILL_REQUESTED)
+    const remainingCount = await client_2.prisma.orderItem.count({
+        where: { orderId: originalOrderId },
+    });
+    if (remainingCount > 0) {
+        await client_2.prisma.table.update({
+            where: { id: originalOrder.tableId },
+            data: { status: client_1.TableStatus.BILL_REQUESTED },
+        });
+    }
+    else {
+        // Si no queda nada en el pedido original, lo marcamos como cancelado
+        await client_2.prisma.order.update({
+            where: { id: originalOrderId },
+            data: { status: client_1.OrderStatus.CANCELLED },
+        });
+    }
+    return result;
+}
+async function getTicketPreview(ticketId) {
+    const ticket = await client_2.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        include: {
+            order: {
+                include: {
+                    items: { include: { product: true } },
+                    table: true,
+                    user: true,
+                },
+            },
+        },
+    });
+    if (!ticket) {
+        throw new Error('Ticket no encontrado');
+    }
+    const payload = buildPrintableTicketPayload(ticket, ticket.order);
+    return {
+        ticket,
+        preview: (0, printer_service_1.buildTicketPreviewText)(payload),
+    };
+}
+async function reprintTicket(ticketId) {
+    const ticket = await client_2.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        include: {
+            order: {
+                include: {
+                    items: { include: { product: true } },
+                    table: true,
+                    user: true,
+                },
+            },
+            venue: true,
+        },
+    });
+    if (!ticket) {
+        throw new Error('Ticket no encontrado');
+    }
+    const printer = await client_2.prisma.printer.findFirst({
+        where: {
+            venueId: ticket.venueId,
+            type: 'RECEIPT',
+            isActive: true,
+        },
+        orderBy: { id: 'asc' },
+    });
+    if (!printer) {
+        throw new Error('No hay impresora de tickets activa en esta sede');
+    }
+    const payload = buildPrintableTicketPayload(ticket, ticket.order);
+    const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
+    await (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, buffer);
+    return { success: true };
+}
+async function getCashSummary(venueId) {
+    let lastClosure = null;
+    try {
+        lastClosure = await client_2.prisma.cashClosure.findFirst({
+            where: { venueId },
+            orderBy: { periodEnd: 'desc' },
+            select: { periodEnd: true },
+        });
+    }
+    catch (error) {
+        if (!isMissingCashClosuresTable(error))
+            throw error;
+    }
+    const periodStart = lastClosure?.periodEnd ?? new Date(new Date().setHours(0, 0, 0, 0));
+    const periodEnd = new Date();
+    const [tickets, aggregate] = await Promise.all([
+        client_2.prisma.ticket.findMany({
+            where: {
+                venueId,
+                issuedAt: { gt: periodStart, lte: periodEnd },
+            },
+            orderBy: { issuedAt: 'desc' },
+            take: 50,
+            select: {
+                id: true,
+                invoiceCode: true,
+                issuedAt: true,
+                total: true,
+            },
+        }),
+        client_2.prisma.ticket.aggregate({
+            where: {
+                venueId,
+                issuedAt: { gt: periodStart, lte: periodEnd },
+            },
+            _count: { id: true },
+            _sum: { total: true },
+        }),
+    ]);
+    return {
+        periodStart,
+        periodEnd,
+        ticketCount: aggregate._count.id,
+        billedTotal: Number(aggregate._sum.total ?? 0),
+        tickets,
+    };
+}
+async function closeCashRegister(input) {
+    const summary = await getCashSummary(input.venueId);
+    let closure;
+    try {
+        closure = await client_2.prisma.cashClosure.create({
+            data: {
+                venueId: input.venueId,
+                userId: input.userId,
+                periodStart: summary.periodStart,
+                periodEnd: summary.periodEnd,
+                ticketCount: summary.ticketCount,
+                billedTotal: new client_1.Prisma.Decimal(summary.billedTotal),
+                notes: input.notes,
+            },
+            include: {
+                user: {
+                    select: { id: true, name: true },
+                },
+            },
+        });
+    }
+    catch (error) {
+        if (isMissingCashClosuresTable(error)) {
+            throw new Error('La tabla de cierres de caja aún no está aplicada en la base de datos');
+        }
+        throw error;
+    }
+    return closure;
 }
 //# sourceMappingURL=tickets.service.js.map

@@ -84,8 +84,62 @@ export function KitchenNoteModal({
               </select>
             </div>
 
+            <div className="form-group" style={{ marginBottom: 'var(--space-3)' }}>
+              <span className="form-label" style={{ display: 'block', marginBottom: '8px' }}>
+                Avisos rápidos (pulsa para añadir)
+              </span>
+              <div style={{
+                display: 'flex',
+                gap: '8px',
+                flexWrap: 'wrap',
+                maxHeight: 110,
+                overflowY: 'auto',
+                padding: '6px',
+                background: 'var(--color-surface-2)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border)'
+              }}>
+                {[
+                  '¡Marcha segundos!',
+                  '¡Sacar postres!',
+                  '¡Servir todo junto!',
+                  'Falta un plato',
+                  '¡Prioridad / Urgente!',
+                  'Comida para llevar',
+                  'Revisar comanda',
+                  'Mesa VIP'
+                ].map((note) => (
+                  <button
+                    key={note}
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setMessage((prev) => {
+                        const trimmed = prev.trim();
+                        if (!trimmed) return note;
+                        return trimmed + '\n' + note;
+                      });
+                      textareaRef.current?.focus();
+                    }}
+                    style={{
+                      fontSize: '0.78rem',
+                      padding: '5px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      fontWeight: 700,
+                      background: 'var(--color-surface-1)',
+                      border: '1px solid var(--color-border)',
+                      cursor: 'pointer',
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    {note}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="form-group">
-              <label className="form-label" htmlFor="kitchen-note-message">Comentario</label>
+              <label className="form-label" htmlFor="kitchen-note-message">Comentario o aviso a mano</label>
               <textarea
                 ref={textareaRef}
                 id="kitchen-note-message"
@@ -94,6 +148,7 @@ export function KitchenNoteModal({
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 disabled={isSubmitting}
+                style={{ minHeight: 90 }}
               />
             </div>
 

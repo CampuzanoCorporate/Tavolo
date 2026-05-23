@@ -11,6 +11,8 @@ interface CartProps {
   summary: CartSummary;
   onSendOrder: () => void;
   onCloseTicket: () => void;
+  onRequestBill: () => void;
+  onSplitBill?: () => void;
   isClosingTicket: boolean;
   hasActiveOrder: boolean;
   onCancelSentItem?: (productId: number, orderItemId: number, quantityToCancel: number) => void;
@@ -22,13 +24,15 @@ export function Cart({
   summary,
   onSendOrder,
   onCloseTicket,
+  onRequestBill,
+  onSplitBill,
   isClosingTicket,
   hasActiveOrder,
   onCancelSentItem,
   onCancelAndFreeTable,
   onRequestMenuCourse,
 }: CartProps) {
-  const { updateQuantity, updateNotes, clearCart, removeFromCart } = useAppStore();
+  const { updateQuantity, updateNotes, clearCart, removeFromCart, activeTable } = useAppStore();
   // removeFromCart available for future swipe-to-delete feature
   const [editingNotesFor, setEditingNotesFor] = useState<string | null>(null);
   const [selectedCartKey, setSelectedCartKey] = useState<string | null>(null);
@@ -49,29 +53,42 @@ export function Cart({
       <aside className="cart" aria-label="Carrito del pedido">
         {/* Cabecera */}
         <div className="cart__header">
-          <h2 className="cart__title">Ticket</h2>
-          {summary.itemCount > 0 && (
-            <span className="cart__count-badge">{summary.itemCount}</span>
-          )}
-          {(summary.itemCount > 0 || hasActiveOrder) && (
-            <button
-              id="btn-clear-cart"
-              className="btn btn-danger"
-              onClick={() => {
-                if (hasActiveOrder && onCancelAndFreeTable) {
-                  if (window.confirm('¿Seguro que quieres liberar la mesa? Se anulará el ticket activo sin enviar cancelación a cocina.')) {
-                    onCancelAndFreeTable();
+          <div className="cart__header-main">
+            <div>
+              <span className="cart__eyebrow">Cuenta</span>
+              <h2 className="cart__title">Ticket</h2>
+            </div>
+            {summary.itemCount > 0 && (
+              <span className="cart__count-badge">{summary.itemCount}</span>
+            )}
+          </div>
+          <div className="cart__header-meta">
+            <span className="cart__meta-pill">
+              {summary.itemCount} línea{summary.itemCount === 1 ? '' : 's'}
+            </span>
+            <span className="cart__meta-pill cart__meta-pill--amount">
+              {Number(summary.total).toFixed(2)} €
+            </span>
+            {(summary.itemCount > 0 || hasActiveOrder) && (
+              <button
+                id="btn-clear-cart"
+                className="btn btn-danger"
+                onClick={() => {
+                  if (hasActiveOrder && onCancelAndFreeTable) {
+                    if (window.confirm('¿Seguro que quieres liberar la mesa? Se anulará el ticket activo sin enviar cancelación a cocina.')) {
+                      onCancelAndFreeTable();
+                    }
+                    return;
                   }
-                  return;
-                }
-                clearCart();
-              }}
-              style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-              aria-label={hasActiveOrder ? 'Liberar mesa' : 'Limpiar carrito'}
-            >
-              {hasActiveOrder ? 'Liberar mesa' : 'Vaciar'}
-            </button>
-          )}
+                  clearCart();
+                }}
+                style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                aria-label={hasActiveOrder ? 'Liberar mesa' : 'Limpiar carrito'}
+              >
+                {hasActiveOrder ? 'Liberar mesa' : 'Vaciar'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Items */}
@@ -83,79 +100,6 @@ export function Cart({
             </div>
           ) : (
             <>
-              {selectedItem && (
-                <div className="cart-selection-bar">
-                  <div className="cart-selection-bar__content">
-                    <span className="cart-selection-bar__label">Línea seleccionada</span>
-                    <span className="cart-selection-bar__name">{selectedItem.name}</span>
-                  </div>
-                  <div className="cart-selection-bar__actions">
-                    {!selectedItem.sent && (
-                      <>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setEditingNotesFor(selectedItem.cartKey)}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => {
-                            removeFromCart(selectedItem.cartKey);
-                            setSelectedCartKey(null);
-                          }}
-                        >
-                          Eliminar línea
-                        </button>
-                      </>
-                    )}
-                    {selectedItem.sent && selectedItem.orderItemId && (
-                      <>
-                        {selectedMenuSelection?.includeFirst && selectedMenuSelection.courses.FIRST && !selectedMenuSelection.courses.FIRST.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'FIRST')}>
-                            Pedir primero
-                          </button>
-                        )}
-                        {selectedMenuSelection?.includeSecond && selectedMenuSelection.courses.SECOND && !selectedMenuSelection.courses.SECOND.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'SECOND')}>
-                            Pedir segundo
-                          </button>
-                        )}
-                        {selectedMenuSelection?.finalMode === 'DESSERT_ONLY' && !selectedMenuSelection.courses.DESSERT?.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
-                            {selectedMenuSelection.courses.DESSERT?.productId ? 'Pedir postre' : 'Elegir postre'}
-                          </button>
-                        )}
-                        {selectedMenuSelection?.finalMode === 'DESSERT_OR_COFFEE' && !selectedMenuSelection.courses.DESSERT?.sent && !selectedMenuSelection.courses.COFFEE?.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
-                            {selectedMenuSelection.courses.DESSERT?.productId || selectedMenuSelection.courses.COFFEE?.productId ? 'Pedir postre/café' : 'Elegir postre o café'}
-                          </button>
-                        )}
-                        {selectedMenuSelection?.finalMode === 'DESSERT_AND_COFFEE' && !selectedMenuSelection.courses.DESSERT?.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
-                            {selectedMenuSelection.courses.DESSERT?.productId ? 'Pedir postre' : 'Elegir postre'}
-                          </button>
-                        )}
-                        {selectedMenuSelection?.finalMode === 'DESSERT_AND_COFFEE' && !selectedMenuSelection.courses.COFFEE?.sent && (
-                          <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'COFFEE')}>
-                            {selectedMenuSelection.courses.COFFEE?.productId ? 'Pedir café' : 'Elegir café'}
-                          </button>
-                        )}
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => {
-                            onCancelSentItem?.(selectedItem.productId, selectedItem.orderItemId!, selectedItem.quantity);
-                            setSelectedCartKey(null);
-                          }}
-                        >
-                          Cancelar línea
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Artículos Enviados */}
               {sentItems.map((item) => (
                 <div
@@ -349,25 +293,155 @@ export function Cart({
             id="btn-send-order"
             className="btn btn-send-kitchen btn-full"
             onClick={onSendOrder}
-            disabled={summary.items.length === 0}
+            disabled={summary.items.length === 0 || pendingItems.length === 0}
           >
             Enviar a cocina
           </button>
 
-          <button
-            id="btn-close-ticket"
-            className="btn btn-pay btn-full btn-lg"
-            onClick={onCloseTicket}
-            disabled={isClosingTicket || (!hasActiveOrder && summary.items.length === 0)}
-          >
-            {isClosingTicket ? (
-              'Procesando...'
-            ) : (
-              `Cobrar ${summary.total > 0 ? `${Number(summary.total).toFixed(2)} €` : ''}`
-            )}
-          </button>
+          {activeTable && activeTable.status !== 'BILL_REQUESTED' ? (
+            <button
+              id="btn-request-bill"
+              className="btn btn-secondary btn-full btn-lg"
+              onClick={onRequestBill}
+              disabled={sentItems.length === 0}
+              style={{ fontWeight: 700 }}
+            >
+              Emitir pre-ticket
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 'var(--space-2)', width: '100%' }}>
+              {sentItems.length > 0 && onSplitBill && (
+                <button
+                  id="btn-split-bill"
+                  className="btn btn-secondary btn-lg"
+                  onClick={onSplitBill}
+                  style={{ flex: 1, fontWeight: 700 }}
+                  type="button"
+                >
+                  Dividir
+                </button>
+              )}
+              <button
+                id="btn-close-ticket"
+                className="btn btn-pay btn-lg"
+                onClick={onCloseTicket}
+                disabled={isClosingTicket || (!hasActiveOrder && summary.items.length === 0)}
+                style={{ flex: 2, fontWeight: 700 }}
+                type="button"
+              >
+                {isClosingTicket ? (
+                  'Procesando...'
+                ) : (
+                  `Cobrar ${summary.total > 0 ? `${Number(summary.total).toFixed(2)} €` : ''}`
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </aside>
+
+      {selectedItem && (
+        <div className="modal-overlay" onClick={() => setSelectedCartKey(null)}>
+          <div className="modal cart-line-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="cart-line-modal__header">
+              <div>
+                <span className="cart-line-modal__eyebrow">Línea del ticket</span>
+                <h3 className="cart-line-modal__title">{selectedItem.name}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setSelectedCartKey(null)}
+                aria-label="Cerrar"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cart-line-modal__summary">
+              <span className="cart-line-modal__pill">Cantidad: {selectedItem.quantity}</span>
+              <span className="cart-line-modal__pill">{(Number(selectedItem.price) * selectedItem.quantity).toFixed(2)} €</span>
+              {selectedItem.sent && (
+                <span className="cart-line-modal__pill cart-line-modal__pill--sent">Enviado</span>
+              )}
+            </div>
+
+            {selectedItem.notes && (
+              <div className="cart-line-modal__notes">
+                {selectedItem.displayNotes ?? selectedItem.notes}
+              </div>
+            )}
+
+            <div className="cart-line-modal__actions">
+              {!selectedItem.sent && (
+                <>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setEditingNotesFor(selectedItem.cartKey);
+                      setSelectedCartKey(null);
+                    }}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => {
+                      removeFromCart(selectedItem.cartKey);
+                      setSelectedCartKey(null);
+                    }}
+                  >
+                    Eliminar línea
+                  </button>
+                </>
+              )}
+              {selectedItem.sent && selectedItem.orderItemId && (
+                <>
+                  {selectedMenuSelection?.includeFirst && selectedMenuSelection.courses.FIRST && !selectedMenuSelection.courses.FIRST.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'FIRST')}>
+                      Pedir primero
+                    </button>
+                  )}
+                  {selectedMenuSelection?.includeSecond && selectedMenuSelection.courses.SECOND && !selectedMenuSelection.courses.SECOND.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'SECOND')}>
+                      Pedir segundo
+                    </button>
+                  )}
+                  {selectedMenuSelection?.finalMode === 'DESSERT_ONLY' && !selectedMenuSelection.courses.DESSERT?.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
+                      {selectedMenuSelection.courses.DESSERT?.productId ? 'Pedir postre' : 'Elegir postre'}
+                    </button>
+                  )}
+                  {selectedMenuSelection?.finalMode === 'DESSERT_OR_COFFEE' && !selectedMenuSelection.courses.DESSERT?.sent && !selectedMenuSelection.courses.COFFEE?.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
+                      {selectedMenuSelection.courses.DESSERT?.productId || selectedMenuSelection.courses.COFFEE?.productId ? 'Pedir postre/café' : 'Elegir postre o café'}
+                    </button>
+                  )}
+                  {selectedMenuSelection?.finalMode === 'DESSERT_AND_COFFEE' && !selectedMenuSelection.courses.DESSERT?.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'DESSERT')}>
+                      {selectedMenuSelection.courses.DESSERT?.productId ? 'Pedir postre' : 'Elegir postre'}
+                    </button>
+                  )}
+                  {selectedMenuSelection?.finalMode === 'DESSERT_AND_COFFEE' && !selectedMenuSelection.courses.COFFEE?.sent && (
+                    <button className="btn btn-secondary" onClick={() => onRequestMenuCourse?.(selectedItem, 'COFFEE')}>
+                      {selectedMenuSelection.courses.COFFEE?.productId ? 'Pedir café' : 'Elegir café'}
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => {
+                      onCancelSentItem?.(selectedItem.productId, selectedItem.orderItemId!, selectedItem.quantity);
+                      setSelectedCartKey(null);
+                    }}
+                  >
+                    Cancelar línea
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de modificadores */}
       {editingItem && (

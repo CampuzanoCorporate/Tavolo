@@ -20,6 +20,40 @@ function slugify(s: string) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+function normalizeVenueForm(venue?: Partial<Venue> | null): VenueForm {
+  return {
+    ...DEFAULT,
+    ...venue,
+    address: venue?.address ?? '',
+    phone: venue?.phone ?? '',
+    nifOverride: venue?.nifOverride ?? '',
+    nameOverride: venue?.nameOverride ?? '',
+  };
+}
+
+function buildVenuePayload(form: VenueForm): VenueForm {
+  const trimmedName = form.name?.trim() ?? '';
+  const trimmedSlug = form.slug?.trim() ?? '';
+  const trimmedAddress = form.address?.trim() ?? '';
+  const trimmedPhone = form.phone?.trim() ?? '';
+  const trimmedNifOverride = form.nifOverride?.trim() ?? '';
+  const trimmedNameOverride = form.nameOverride?.trim() ?? '';
+  const trimmedInvoiceSeries = form.invoiceSeries?.trim().toUpperCase() ?? 'T';
+
+  return {
+    name: trimmedName,
+    slug: trimmedSlug,
+    address: trimmedAddress || undefined,
+    phone: trimmedPhone || undefined,
+    timezone: form.timezone ?? 'Europe/Madrid',
+    isActive: form.isActive ?? true,
+    useOrgNif: form.useOrgNif ?? true,
+    nifOverride: form.useOrgNif ? undefined : (trimmedNifOverride || undefined),
+    nameOverride: form.useOrgNif ? undefined : (trimmedNameOverride || undefined),
+    invoiceSeries: trimmedInvoiceSeries,
+  };
+}
+
 export function VenueFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id;
@@ -32,7 +66,7 @@ export function VenueFormPage() {
     if (!isEdit) return;
     setLoading(true);
     adminApi.getVenue(parseInt(id!, 10))
-      .then((v) => setForm(v))
+      .then((v) => setForm(normalizeVenueForm(v)))
       .catch(() => toast.error('Error cargando sede'))
       .finally(() => setLoading(false));
   }, [id, isEdit]);
@@ -48,11 +82,12 @@ export function VenueFormPage() {
     e.preventDefault();
     setSaving(true);
     try {
+      const payload = buildVenuePayload(form);
       if (isEdit) {
-        await adminApi.updateVenue(parseInt(id!, 10), form);
+        await adminApi.updateVenue(parseInt(id!, 10), payload);
         toast.success('Sede actualizada');
       } else {
-        await adminApi.createVenue(form);
+        await adminApi.createVenue(payload);
         toast.success('Sede creada');
       }
       navigate('/admin/venues');

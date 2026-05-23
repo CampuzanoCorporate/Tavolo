@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { adminApi, printersApi } from '../../services/api';
-import type { Printer, Venue } from '../../types';
+import type { Printer, ProductionStation, Venue } from '../../types';
 
 export function PrintersAdminPage() {
   const { id: venueIdStr } = useParams<{ id: string }>();
@@ -14,8 +14,10 @@ export function PrintersAdminPage() {
 
   const [venue, setVenue] = useState<Venue | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
+  const [stations, setStations] = useState<ProductionStation[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [stationModalOpen, setStationModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -30,12 +32,23 @@ export function PrintersAdminPage() {
   const [type, setType] = useState<'RECEIPT' | 'KITCHEN' | 'BAR'>('RECEIPT');
   const [isActive, setIsActive] = useState(true);
 
+  const [selectedStationId, setSelectedStationId] = useState<number | null>(null);
+  const [stationName, setStationName] = useState('');
+  const [stationCode, setStationCode] = useState('');
+  const [stationPrinterId, setStationPrinterId] = useState<number | null>(null);
+  const [stationSortOrder, setStationSortOrder] = useState(0);
+  const [stationIsActive, setStationIsActive] = useState(true);
+
   const loadData = async () => {
     try {
       const v = await adminApi.getVenue(venueId);
       setVenue(v);
-      const p = await adminApi.getPrinters(venueId);
+      const [p, s] = await Promise.all([
+        adminApi.getPrinters(venueId),
+        adminApi.getProductionStations(venueId),
+      ]);
       setPrinters(p);
+      setStations(s);
     } catch {
       toast.error('Error cargando impresoras');
     } finally {
@@ -57,6 +70,16 @@ export function PrintersAdminPage() {
     setModalOpen(true);
   };
 
+  const openNewStationModal = () => {
+    setSelectedStationId(null);
+    setStationName('');
+    setStationCode('');
+    setStationPrinterId(null);
+    setStationSortOrder(stations.length);
+    setStationIsActive(true);
+    setStationModalOpen(true);
+  };
+
   const openEditPrinterModal = (p: Printer) => {
     setSelectedPrinterId(p.id);
     setName(p.name);
@@ -67,6 +90,16 @@ export function PrintersAdminPage() {
     setModalOpen(true);
   };
 
+  const openEditStationModal = (station: ProductionStation) => {
+    setSelectedStationId(station.id);
+    setStationName(station.name);
+    setStationCode(station.code ?? '');
+    setStationPrinterId(station.printerId ?? null);
+    setStationSortOrder(station.sortOrder);
+    setStationIsActive(station.isActive);
+    setStationModalOpen(true);
+  };
+
   const handleDelete = async (printerId: number) => {
     if (!window.confirm('¿Seguro que quieres eliminar esta impresora?')) return;
     try {
@@ -75,6 +108,17 @@ export function PrintersAdminPage() {
       loadData();
     } catch {
       toast.error('Error eliminando la impresora');
+    }
+  };
+
+  const handleDeleteStation = async (stationId: number) => {
+    if (!window.confirm('¿Seguro que quieres desactivar esta sección?')) return;
+    try {
+      await adminApi.deleteProductionStation(stationId);
+      toast.success('Sección desactivada');
+      loadData();
+    } catch {
+      toast.error('Error desactivando la sección');
     }
   };
 
@@ -101,6 +145,35 @@ export function PrintersAdminPage() {
       loadData();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Error guardando';
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const payload = {
+        name: stationName,
+        code: stationCode || null,
+        printerId: stationPrinterId,
+        sortOrder: stationSortOrder,
+        isActive: stationIsActive,
+      };
+
+      if (selectedStationId) {
+        await adminApi.updateProductionStation(selectedStationId, payload);
+        toast.success('Sección actualizada');
+      } else {
+        await adminApi.createProductionStation(venueId, payload);
+        toast.success('Sección creada');
+      }
+      setStationModalOpen(false);
+      loadData();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Error guardando sección';
       toast.error(msg);
     } finally {
       setSaving(false);
@@ -139,6 +212,9 @@ export function PrintersAdminPage() {
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/admin/venues')}>
             Volver a sedes
+          </button>
+          <button className="btn btn-secondary" onClick={openNewStationModal}>
+            + Nueva sección
           </button>
           <button id="btn-new-printer" className="btn btn-primary" onClick={openNewPrinterModal}>
             + Nueva Impresora
@@ -201,6 +277,60 @@ export function PrintersAdminPage() {
                           onClick={() => handleDelete(p.id)}
                         >
                           Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+          <div>
+            <h2 className="admin-section-title">Secciones de producción</h2>
+            <p className="admin-page-subtitle">Asigna una impresora a Cocina, Freidoras, Barra caliente u otras zonas de trabajo.</p>
+          </div>
+        </div>
+        <div className="admin-table-wrapper" style={{ overflowX: 'auto' }}>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Código</th>
+                <th>Impresora asignada</th>
+                <th>Estado</th>
+                <th style={{ textAlign: 'right' }}>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stations.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
+                    No hay secciones de producción configuradas todavía.
+                  </td>
+                </tr>
+              ) : (
+                stations.map((station) => (
+                  <tr key={station.id}>
+                    <td style={{ fontWeight: 600 }}>{station.name}</td>
+                    <td>{station.code || 'Sin código'}</td>
+                    <td>{station.printer?.name ?? 'Sin impresora asignada'}</td>
+                    <td>
+                      <span className={`admin-badge ${station.isActive ? 'admin-badge--success' : 'admin-badge--muted'}`}>
+                        {station.isActive ? 'Activa' : 'Inactiva'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => openEditStationModal(station)}>
+                          Editar
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDeleteStation(station.id)}>
+                          Desactivar
                         </button>
                       </div>
                     </td>
@@ -294,6 +424,58 @@ export function PrintersAdminPage() {
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-4)' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>Cancelar</button>
                 <button id="btn-save-printer" type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Guardando...' : 'Guardar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {stationModalOpen && (
+        <div className="modal-backdrop" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal-content" style={{ maxWidth: 450, width: '100%' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">{selectedStationId ? 'Editar sección' : 'Nueva sección'}</h3>
+              <button className="modal-close" onClick={() => setStationModalOpen(false)}>×</button>
+            </div>
+
+            <form onSubmit={handleStationSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-4)' }}>
+              <div className="form-group">
+                <label className="form-label">Nombre *</label>
+                <input className="form-input" value={stationName} onChange={(e) => setStationName(e.target.value)} required placeholder="Ej: Freidoras" />
+              </div>
+              <div className="form-row-2">
+                <div className="form-group">
+                  <label className="form-label">Código</label>
+                  <input className="form-input" value={stationCode} onChange={(e) => setStationCode(e.target.value)} placeholder="Ej: FRI" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Orden</label>
+                  <input className="form-input" type="number" value={stationSortOrder} onChange={(e) => setStationSortOrder(parseInt(e.target.value || '0', 10))} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Impresora asignada</label>
+                <select
+                  className="form-select"
+                  value={stationPrinterId ?? ''}
+                  onChange={(e) => setStationPrinterId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                >
+                  <option value="">Sin impresora</option>
+                  {printers.filter((printer) => printer.isActive).map((printer) => (
+                    <option key={printer.id} value={printer.id}>{printer.name}</option>
+                  ))}
+                </select>
+              </div>
+              <label className="admin-tag-option selected" style={{ justifyContent: 'flex-start' }}>
+                <input type="checkbox" checked={stationIsActive} onChange={(e) => setStationIsActive(e.target.checked)} />
+                <span>Sección activa</span>
+              </label>
+
+              <div className="modal__actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setStationModalOpen(false)} style={{ flex: 1 }}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={saving || !stationName.trim()} style={{ flex: 2 }}>
                   {saving ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>

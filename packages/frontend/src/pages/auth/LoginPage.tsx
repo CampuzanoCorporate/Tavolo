@@ -30,7 +30,7 @@ export function LoginPage() {
       }
 
       if (data.venueIds.length === 1) {
-        navigate('/');
+        navigate(data.user.role === 'KITCHEN' ? '/kitchen' : '/');
       } else {
         navigate('/select-venue');
       }
@@ -50,12 +50,13 @@ export function LoginPage() {
 
       <div className="login-card">
         {/* Logo */}
-        <div className="login-logo">
-          <span className="login-logo__icon" />
-          <div>
-            <h1 className="login-logo__title">Tavolo</h1>
-            <span className="login-logo__subtitle">Sistema TPV Profesional</span>
-          </div>
+        <div className="login-logo" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+          <img 
+            src="/Logo_Tavolo.png" 
+            alt="Tavolo Logo" 
+            style={{ height: '64px', width: 'auto', objectFit: 'contain' }} 
+          />
+          <span className="login-logo__subtitle">Sistema TPV Profesional</span>
         </div>
 
         <p className="login-welcome">Inicia sesión en tu cuenta</p>

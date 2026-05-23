@@ -45,12 +45,13 @@ export function VenueSelectorPage() {
       <div className="login-bg-orb login-bg-orb--2" />
 
       <div className="login-card" style={{ maxWidth: 520 }}>
-        <div className="login-logo">
-          <span className="login-logo__icon" />
-          <div>
-            <h1 className="login-logo__title">Tavolo</h1>
-            <span className="login-logo__subtitle">Selecciona tu sede</span>
-          </div>
+        <div className="login-logo" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-5)' }}>
+          <img 
+            src="/Logo_Tavolo.png" 
+            alt="Tavolo Logo" 
+            style={{ height: '64px', width: 'auto', objectFit: 'contain' }} 
+          />
+          <span className="login-logo__subtitle">Selecciona tu sede</span>
         </div>
 
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: 'var(--space-5)' }}>

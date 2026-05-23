@@ -10,7 +10,7 @@ const NAV_ITEMS = [
   { to: '/admin/venues',   label: 'Sedes' },
   { to: '/admin/products', label: 'Catálogo' },
   { to: '/admin/users',    label: 'Usuarios' },
-  { to: '/admin/tickets',  label: 'Facturas' },
+  { to: '/admin/tickets',  label: 'Histórico' },
 ];
 
 export function AdminLayout() {
@@ -27,12 +27,13 @@ export function AdminLayout() {
     <div className="admin-layout">
       {/* Sidebar */}
       <aside className="admin-sidebar">
-        <div className="admin-sidebar__logo">
-          <span className="admin-sidebar__logo-mark" aria-hidden="true" />
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--color-accent)' }}>Tavolo</div>
-            <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Panel de gestión</div>
-          </div>
+        <div className="admin-sidebar__logo" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
+          <img 
+            src="/Logo_Tavolo.png" 
+            alt="Tavolo Logo" 
+            style={{ height: '36px', width: 'auto', objectFit: 'contain' }} 
+          />
+          <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Panel de gestión</div>
         </div>
 
         {currentVenue && (

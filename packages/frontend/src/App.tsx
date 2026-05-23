@@ -6,6 +6,7 @@ import { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { TableMapPage } from './pages/TableMapPage';
 import { POSPage } from './pages/POSPage';
+import { KitchenPage } from './pages/KitchenPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { VenueSelectorPage } from './pages/auth/VenueSelectorPage';
 import { AdminLayout } from './pages/admin/AdminLayout';
@@ -23,10 +24,14 @@ import { countPendingOrders } from './services/offlineStorage';
 // ── PROTECCIÓN DE RUTAS ──────────────────────────────────────────────────────
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, currentVenueId } = useAppStore();
+  const { isAuthenticated, currentVenueId, currentUser } = useAppStore();
   
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (currentUser?.role === 'KITCHEN' && window.location.pathname === '/') {
+    return <Navigate to="/kitchen" replace />;
   }
 
   // Si está autenticado pero tiene múltiples sedes y no ha elegido una, ir a selector
@@ -54,6 +59,7 @@ function Navbar() {
   const location = useLocation();
   const isPOS = location.pathname.startsWith('/pos/');
   const isAdmin = location.pathname.startsWith('/admin');
+  const isKitchen = location.pathname.startsWith('/kitchen');
   const canAccessAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER');
 
   useEffect(() => {
@@ -83,9 +89,12 @@ function Navbar() {
   return (
     <header className="navbar">
       {/* Logo */}
-      <div className="navbar__logo">
-        <span className="navbar__logo-mark" aria-hidden="true" />
-        <span>Tavolo</span>
+      <div className="navbar__logo" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <img 
+          src="/Logo_Tavolo.png" 
+          alt="Tavolo Logo" 
+          style={{ height: '32px', width: 'auto', objectFit: 'contain' }} 
+        />
         <span style={{
           fontSize: '0.65rem',
           color: 'var(--color-text-muted)',
@@ -109,7 +118,7 @@ function Navbar() {
       </div>
 
       {/* Navegación */}
-      {!isPOS && !isAdmin && canAccessAdmin && (
+      {!isPOS && !isAdmin && !isKitchen && canAccessAdmin && (
         <nav className="navbar__nav navbar__nav--switcher">
           <NavLink
             to="/"
@@ -176,6 +185,12 @@ export default function App() {
         <Route path="/" element={
           <PrivateRoute>
             <TableMapPage />
+          </PrivateRoute>
+        } />
+
+        <Route path="/kitchen" element={
+          <PrivateRoute>
+            <KitchenPage />
           </PrivateRoute>
         } />
         

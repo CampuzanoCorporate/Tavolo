@@ -14,6 +14,7 @@ export type OrderStatus = 'OPEN' | 'SENT_TO_KITCHEN' | 'READY' | 'CLOSED' | 'CAN
 export type ProductType = 'NORMAL' | 'MENU';
 export type MenuCourseTag = 'FIRST' | 'SECOND' | 'DESSERT' | 'COFFEE';
 export type MenuFinalMode = 'DESSERT_ONLY' | 'DESSERT_OR_COFFEE' | 'DESSERT_AND_COFFEE';
+export type ProductionItemStatus = 'PENDING' | 'IN_PROGRESS' | 'READY';
 
 export interface Organisation {
   id: number;
@@ -65,6 +66,7 @@ export interface Category {
   icon?: string;
   sortOrder: number;
   isActive: boolean;
+  preparationStationId?: number | null;
   modifierGroups?: ModifierGroup[];
   products?: Product[];
 }
@@ -100,7 +102,19 @@ export interface Product {
   productType: ProductType;
   menuCourseTags: MenuCourseTag[];
   menuConfig?: MenuConfig | null;
+  preparationStationId?: number | null;
   isAvailable: boolean;
+  sortOrder: number;
+}
+
+export interface ProductionStation {
+  id: number;
+  venueId: number;
+  name: string;
+  code?: string | null;
+  printerId?: number | null;
+  printer?: Printer | null;
+  isActive: boolean;
   sortOrder: number;
 }
 
@@ -125,6 +139,9 @@ export interface Table {
   objectType: string;
   width?: number;
   height?: number;
+  activeOrderId?: number | null;
+  activeOrderStatus?: OrderStatus | null;
+  kitchenReady?: boolean;
 }
 
 // ── Pedidos ───────────────────────────────────────────────────────────────────
@@ -167,6 +184,77 @@ export interface OrderItem {
   vatRate: number;
   notes?: string;
   product: Product;
+}
+
+export interface KitchenQueueItem {
+  id: string;
+  productionItemId: number;
+  orderId: number;
+  orderItemId: number;
+  tableId: number;
+  tableNumber: number;
+  tableName?: string;
+  waiterName: string;
+  stationId?: number | null;
+  stationName?: string;
+  productName: string;
+  quantity: number;
+  description?: string;
+  notes?: string;
+  courseLabel?: string;
+  sourceMenuName?: string;
+  status: ProductionItemStatus;
+  createdAt: string;
+  readyAt?: string;
+}
+
+export interface KitchenQueueSummaryItem {
+  productName: string;
+  totalQuantity: number;
+  tables: Array<{ tableNumber: number; quantity: number }>;
+}
+
+export interface TicketPreviewData {
+  ticket: {
+    id: number;
+    invoiceCode: string;
+    issuedAt: string;
+    total: number | string;
+    businessName: string;
+    businessNif: string;
+    businessAddress: string;
+    qrBase64?: string | null;
+  };
+  preview: string;
+}
+
+export interface CashSummaryTicket {
+  id: number;
+  invoiceCode: string;
+  issuedAt: string;
+  total: number | string;
+}
+
+export interface CashSummaryData {
+  periodStart: string;
+  periodEnd: string;
+  ticketCount: number;
+  billedTotal: number;
+  tickets: CashSummaryTicket[];
+}
+
+export interface CashClosure {
+  id: number;
+  periodStart: string;
+  periodEnd: string;
+  ticketCount: number;
+  billedTotal: number | string;
+  notes?: string | null;
+  createdAt: string;
+  user: {
+    id: number;
+    name: string;
+  };
 }
 
 // ── Impresoras ────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { adminApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
-import type { Category, MenuConfig, MenuCourseTag, ModifierGroup, ModifierOption, ProductType } from '../../types';
+import type { Category, MenuConfig, MenuCourseTag, ModifierGroup, ModifierOption, ProductType, ProductionStation } from '../../types';
 
 interface ModifierOptionForm {
   id?: number;
@@ -28,6 +28,7 @@ interface CatForm {
   color: string;
   icon: string;
   sortOrder: number;
+  preparationStationId: number | null;
   modifierGroups: ModifierGroupForm[];
 }
 
@@ -40,6 +41,7 @@ interface ProdForm {
   productType: ProductType;
   menuCourseTags: MenuCourseTag[];
   menuConfig: MenuConfig | null;
+  preparationStationId: number | null;
   sortOrder: number;
 }
 
@@ -67,6 +69,7 @@ const DEFAULT_CAT: CatForm = {
   color: '#9A6B3F',
   icon: '',
   sortOrder: 0,
+  preparationStationId: null,
   modifierGroups: [],
 };
 
@@ -79,6 +82,7 @@ const DEFAULT_PROD: ProdForm = {
   productType: 'NORMAL',
   menuCourseTags: [],
   menuConfig: null,
+  preparationStationId: null,
   sortOrder: 0,
 };
 
@@ -140,6 +144,7 @@ export function ProductsAdminPage() {
   const { currentVenueId } = useAppStore();
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [stations, setStations] = useState<ProductionStation[]>([]);
   const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
   const [catForm, setCatForm] = useState<CatForm>(DEFAULT_CAT);
   const [prodForm, setProdForm] = useState<ProdForm>(DEFAULT_PROD);
@@ -150,12 +155,14 @@ export function ProductsAdminPage() {
 
   const load = async () => {
     if (!currentVenueId) return;
-    const [cats, prods] = await Promise.all([
+    const [cats, prods, stationData] = await Promise.all([
       adminApi.getCategories(currentVenueId),
       adminApi.getProducts(currentVenueId),
+      adminApi.getProductionStations(currentVenueId),
     ]);
     setCategories(cats);
     setProducts(prods.map(normalizeProduct));
+    setStations(stationData);
   };
 
   useEffect(() => {
@@ -195,6 +202,7 @@ export function ProductsAdminPage() {
         productType: prodForm.productType,
         menuCourseTags: prodForm.productType === 'NORMAL' ? prodForm.menuCourseTags : [],
         menuConfig: prodForm.productType === 'MENU' ? prodForm.menuConfig : null,
+        preparationStationId: prodForm.preparationStationId,
         sortOrder: prodForm.sortOrder,
       };
 
@@ -247,6 +255,7 @@ export function ProductsAdminPage() {
       color: category.color ?? '#9A6B3F',
       icon: category.icon ?? '',
       sortOrder: category.sortOrder,
+      preparationStationId: category.preparationStationId ?? null,
       modifierGroups: mapGroups(category.modifierGroups),
     });
     setEditingCat(category.id);
@@ -441,6 +450,7 @@ export function ProductsAdminPage() {
                             productType: product.productType,
                             menuCourseTags: product.menuCourseTags ?? [],
                             menuConfig: product.menuConfig ?? null,
+                            preparationStationId: product.preparationStationId ?? null,
                             sortOrder: product.sortOrder,
                           });
                           setEditingProd(product.id);
@@ -505,6 +515,22 @@ export function ProductsAdminPage() {
                   onChange={(event) => setCatForm((current) => ({ ...current, sortOrder: parseInt(event.target.value || '0', 10) }))}
                 />
               </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Sección por defecto</label>
+              <select
+                className="form-select"
+                value={catForm.preparationStationId ?? ''}
+                onChange={(event) => setCatForm((current) => ({
+                  ...current,
+                  preparationStationId: event.target.value ? parseInt(event.target.value, 10) : null,
+                }))}
+              >
+                <option value="">Cocina general / sin sección fija</option>
+                {stations.map((station) => (
+                  <option key={station.id} value={station.id}>{station.name}</option>
+                ))}
+              </select>
             </div>
 
             <div className="admin-section" style={{ marginBottom: 0 }}>
@@ -699,6 +725,22 @@ export function ProductsAdminPage() {
                 >
                   <option value="NORMAL">Producto normal</option>
                   <option value="MENU">Menú</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Sección de preparación</label>
+                <select
+                  className="form-select"
+                  value={prodForm.preparationStationId ?? ''}
+                  onChange={(event) => setProdForm((current) => ({
+                    ...current,
+                    preparationStationId: event.target.value ? parseInt(event.target.value, 10) : null,
+                  }))}
+                >
+                  <option value="">Usar la sección de la categoría</option>
+                  {stations.map((station) => (
+                    <option key={station.id} value={station.id}>{station.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
