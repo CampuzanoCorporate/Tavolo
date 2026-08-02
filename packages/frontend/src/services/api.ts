@@ -6,6 +6,7 @@
  */
 import axios from 'axios';
 import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics } from '../types';
+import { useAppStore } from '../store/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
@@ -24,9 +25,9 @@ apiClient.interceptors.request.use((cfg) => {
 apiClient.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('tavolo_token');
-      localStorage.removeItem('tavolo_venue_id');
+    const isAuthLogin = err.config?.url?.includes('auth/login');
+    if (err.response?.status === 401 && !isAuthLogin) {
+      useAppStore.getState().logout();
       window.location.href = '/login';
     }
     return Promise.reject(err);

@@ -104,6 +104,10 @@ function Navbar() {
     return null;
   }
 
+  const handleHeaderLogout = () => {
+    logout();
+  };
+
   return (
     <header className="navbar">
       {/* Logo */}
@@ -136,7 +140,7 @@ function Navbar() {
       </div>
 
       {/* Navegación */}
-      {!isPOS && !isAdmin && !isKitchen && canAccessAdmin && (
+      {!isPOS && !isKitchen && canAccessAdmin && (
         <nav className="navbar__nav navbar__nav--switcher">
           <NavLink
             to="/"
@@ -180,6 +184,21 @@ function Navbar() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginLeft: 'var(--space-2)', borderLeft: '1px solid var(--color-border)', paddingLeft: 'var(--space-3)' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{currentUser.name}</span>
             <button className="btn btn-ghost btn-sm" onClick={logout} style={{ fontSize: '0.75rem', padding: '4px 8px' }}>
+              Salir
+            </button>
+          </div>
+        )}
+
+        {currentUser && isAdmin && (
+          <div className="navbar__admin-tools">
+            <span className="navbar__admin-label">
+              {currentUser.role === 'ADMIN' ? 'Administrador' : 'Gestión'}
+            </span>
+            <button
+              id="btn-admin-logout"
+              className="navbar__admin-logout"
+              onClick={handleHeaderLogout}
+            >
               Salir
             </button>
           </div>

@@ -316,21 +316,7 @@ export function KitchenPage() {
   return (
     <main className="kitchen-page">
       <div className="kitchen-page__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-          <button
-            type="button"
-            className="kitchen-menu-button"
-            onClick={() => {
-              setIsHistoryOpen(true);
-              void loadHistory();
-            }}
-            title="Ver mesas abiertas"
-            aria-label="Ver mesas abiertas"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
-          </button>
+        <div className="kitchen-page__title-block">
           <div>
             <h1 className="admin-page-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
               Cocina
@@ -341,12 +327,21 @@ export function KitchenPage() {
           </div>
         </div>
         <div className="kitchen-page__meta">
+          <button
+            type="button"
+            className="btn btn-secondary kitchen-header-btn"
+            onClick={() => {
+              setIsHistoryOpen(true);
+              void loadHistory();
+            }}
+          >
+            Mesas abiertas
+          </button>
           {stations.length > 0 && (
             <select
-              className="form-select"
+              className="form-select kitchen-station-select"
               value={selectedStationId ?? ''}
               onChange={(event) => setSelectedStationId(event.target.value ? Number(event.target.value) : null)}
-              style={{ minWidth: 220 }}
             >
               {stations.map((station) => (
                 <option key={station.id} value={station.id}>

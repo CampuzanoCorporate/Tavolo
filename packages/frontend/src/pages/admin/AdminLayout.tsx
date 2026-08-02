@@ -1,9 +1,8 @@
 /**
  * TAVOLO POS — Layout del Panel de Administración
  */
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore';
-import toast from 'react-hot-toast';
 import type { AppPermission } from '../../types';
 
 const NAV_ITEMS = [
@@ -82,17 +81,8 @@ function AdminNavIcon({ type }: { type: 'dashboard' | 'venues' | 'catalog' | 'us
 }
 
 export function AdminLayout() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { currentUser, logout, currentVenue } = useAppStore();
+  const { currentUser, currentVenue } = useAppStore();
   const availableNavItems = NAV_ITEMS.filter((item) => currentUser?.role === 'ADMIN' || currentUser?.permissions?.includes(item.permission));
-  const isDashboard = location.pathname === '/admin';
-
-  const handleLogout = () => {
-    logout();
-    toast.success('Sesión cerrada');
-    navigate('/login');
-  };
 
   return (
     <div className="admin-layout">
@@ -104,7 +94,6 @@ export function AdminLayout() {
             alt="Tavolo Logo" 
             style={{ height: '36px', width: 'auto', objectFit: 'contain' }} 
           />
-          <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Panel de gestión</div>
         </div>
 
         {currentVenue && (
@@ -130,44 +119,10 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-
-        <div className="admin-sidebar__footer">
-          {currentUser && (
-            <div className="admin-sidebar__user">
-              <div className="admin-sidebar__avatar">
-                {currentUser.name[0].toUpperCase()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentUser.name}
-                </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{currentUser.role}</div>
-              </div>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-            <button
-              id="btn-go-pos"
-              className="btn btn-ghost"
-              onClick={() => navigate('/')}
-              style={{ flex: 1, fontSize: '0.8rem' }}
-            >
-              Ir a mesas
-            </button>
-            <button
-              id="btn-admin-logout"
-              className="btn btn-danger"
-              onClick={handleLogout}
-              style={{ flex: 1, fontSize: '0.8rem' }}
-            >
-              Salir
-            </button>
-          </div>
-        </div>
       </aside>
 
       {/* Contenido */}
-      <main className={`admin-main ${isDashboard ? 'admin-main--dashboard' : ''}`}>
+      <main className="admin-main">
         <Outlet />
       </main>
     </div>
