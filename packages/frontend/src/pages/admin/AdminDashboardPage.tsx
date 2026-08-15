@@ -114,6 +114,20 @@ export function AdminDashboardPage() {
 
         <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="admin-badge admin-badge--info">Trimestre</span>
+          </div>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              {formatCurrency(metrics?.quarter.billedTotal ?? 0)}
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+              T{metrics?.quarter.quarter ?? Math.floor(new Date().getMonth() / 3) + 1} · {metrics?.quarter.ticketCount ?? 0} tickets
+            </p>
+          </div>
+        </div>
+
+        <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="admin-badge admin-badge--info">Sede</span>
           </div>
           <div style={{ marginTop: 'var(--space-4)' }}>
@@ -142,14 +156,16 @@ export function AdminDashboardPage() {
 
         <div className="admin-venue-card" style={{ padding: 'var(--space-4)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="admin-badge admin-badge--success">Sede Activa</span>
+            <span className="admin-badge admin-badge--success">Fiscal</span>
           </div>
           <div style={{ marginTop: 'var(--space-4)' }}>
             <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentVenue?.name ?? 'Ninguna'}
+              {metrics?.fiscalCertificate ? 'Certificado cargado' : 'Pendiente'}
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
-              Factura actual: <code className="admin-code">{currentVenue?.invoiceSeries ?? 'T'}-2026-X</code>
+              {metrics?.fiscalCertificate
+                ? `${metrics.fiscalCertificate.originalFilename}${metrics?.ticketLogo ? ' · logo listo' : ''}`
+                : `Serie actual: ${currentVenue?.invoiceSeries ?? 'T'}`}
             </p>
           </div>
         </div>

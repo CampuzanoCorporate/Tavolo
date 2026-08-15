@@ -64,6 +64,10 @@ export const config = {
     // certPassword: optional('CERT_PASSWORD', ''),
   },
 
+  certificates: {
+    encryptionSecret: optional('CERT_ENCRYPTION_SECRET', required('JWT_SECRET')),
+  },
+
   licensing: {
     masterKey: optional('LICENSE_MASTER_KEY', ''),
     defaultValidityDays: parseInt(optional('LICENSE_VALIDITY_DAYS', '30'), 10),

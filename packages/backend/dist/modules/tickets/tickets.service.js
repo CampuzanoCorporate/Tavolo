@@ -25,6 +25,7 @@ const qr_service_1 = require("../verifactu/qr.service");
 const printer_service_1 = require("../printing/printer.service");
 const config_1 = require("../../config");
 const menuSelection_1 = require("../orders/menuSelection");
+const logo_service_1 = require("../printing/logo.service");
 function isMissingCashClosuresTable(error) {
     return error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
 }
@@ -51,6 +52,7 @@ function buildPrintableTicketPayload(ticket, order) {
         vatAmount: parseFloat(ticket.vatAmount.toString()),
         vatRate: dominantVatRate,
         total: parseFloat(ticket.total.toString()),
+        logoPngBase64: ticket.logoPngBase64 ?? undefined,
         qrBase64: ticket.qrBase64 ?? undefined,
     };
 }
@@ -85,6 +87,7 @@ async function closeTicket(input) {
     const effectiveNif = venue.useOrgNif ? venue.organisation.nif : (venue.nifOverride ?? venue.organisation.nif);
     const effectiveName = venue.useOrgNif ? venue.organisation.name : (venue.nameOverride ?? venue.organisation.name);
     const effectiveAddress = venue.address ?? venue.organisation.address ?? '';
+    const ticketLogoBase64 = await (0, logo_service_1.getTicketLogoBase64)(venue.organisationId);
     // ── 3. Calcular importes ──────────────────────────────────────────────────
     let subtotal = 0;
     let total = 0;
@@ -215,7 +218,7 @@ async function closeTicket(input) {
                 tableNumber: order.table.number,
                 waiterName: order.user.name,
                 items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitPrice: parseFloat(i.unitPrice.toString()), notes: (0, menuSelection_1.getVisibleNotes)(i.notes) })),
-                subtotal, vatAmount, vatRate: dominantVatRate, total, qrBase64,
+                subtotal, vatAmount, vatRate: dominantVatRate, total, logoPngBase64: ticketLogoBase64, qrBase64,
             });
             await (0, printer_service_1.sendToPrinter)({ ipAddress: printerIp, port: printerPort }, buf);
         }
@@ -349,7 +352,10 @@ async function getTicketPreview(ticketId) {
     if (!ticket) {
         throw new Error('Ticket no encontrado');
     }
-    const payload = buildPrintableTicketPayload(ticket, ticket.order);
+    const payload = buildPrintableTicketPayload({
+        ...ticket,
+        logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.order.user.organisationId),
+    }, ticket.order);
     return {
         ticket,
         preview: (0, printer_service_1.buildTicketPreviewText)(payload),
@@ -383,7 +389,10 @@ async function reprintTicket(ticketId) {
     if (!printer) {
         throw new Error('No hay impresora de tickets activa en esta sede');
     }
-    const payload = buildPrintableTicketPayload(ticket, ticket.order);
+    const payload = buildPrintableTicketPayload({
+        ...ticket,
+        logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.venue.organisationId),
+    }, ticket.order);
     const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
     await (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, buffer);
     return { success: true };

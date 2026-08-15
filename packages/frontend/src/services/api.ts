@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
@@ -126,6 +126,20 @@ export const adminApi = {
   getOrg:        () => apiClient.get<{ data: Organisation & { venues: Venue[] } }>('/api/admin/organisation').then((r) => r.data.data),
   updateOrg:     (data: Partial<Organisation>) => apiClient.put('/api/admin/organisation', data).then((r) => r.data.data),
   getOwnerMetrics: () => apiClient.get<{ data: OwnerDashboardMetrics }>('/api/admin/dashboard/owner-metrics').then((r) => r.data.data),
+  getQuarterlyReport: (params?: { year?: number; quarter?: number; venueId?: number }) =>
+    apiClient.get<{ data: QuarterlyReport }>('/api/admin/reports/quarterly', { params }).then((r) => r.data.data),
+  getFiscalCertificate: () =>
+    apiClient.get<{ data: FiscalCertificateSummary | null }>('/api/admin/fiscal/certificate').then((r) => r.data.data),
+  saveFiscalCertificate: (data: { label?: string | null; filename: string; mimeType?: string | null; base64Content: string; passphrase: string }) =>
+    apiClient.put<{ data: FiscalCertificateSummary }>('/api/admin/fiscal/certificate', data).then((r) => r.data.data),
+  deleteFiscalCertificate: () =>
+    apiClient.delete('/api/admin/fiscal/certificate').then((r) => r.data),
+  getTicketLogo: () =>
+    apiClient.get<{ data: TicketLogoSummary | null }>('/api/admin/branding/ticket-logo').then((r) => r.data.data),
+  saveTicketLogo: (data: { label?: string | null; filename: string; mimeType?: string | null; pngBase64: string; width: number; height: number }) =>
+    apiClient.put<{ data: TicketLogoSummary }>('/api/admin/branding/ticket-logo', data).then((r) => r.data.data),
+  deleteTicketLogo: () =>
+    apiClient.delete('/api/admin/branding/ticket-logo').then((r) => r.data),
 
   // Sedes
   getVenues:     () => apiClient.get<{ data: Venue[] }>('/api/admin/venues').then((r) => r.data.data),

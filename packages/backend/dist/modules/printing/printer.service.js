@@ -28,6 +28,10 @@ exports.buildKitchenMessageBuffer = buildKitchenMessageBuffer;
  * ============================================================
  */
 const net_1 = __importDefault(require("net"));
+// `pngjs` ya existe en el árbol de dependencias y nos permite rasterizar
+// el logo a ESC/POS sin dependencias nativas.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { PNG } = require('pngjs');
 // ─── CONSTANTES ESC/POS ────────────────────────────────────────────────────
 /** Comandos ESC/POS estándar */
 const ESC = 0x1b;
@@ -114,6 +118,14 @@ function buildTicketBuffer(data) {
     const line = (char = '-', length = 42) => text(char.repeat(length));
     // ── Inicializar impresora
     parts.push(exports.ESCPOS.INIT);
+    if (data.logoPngBase64) {
+        const logoBuffer = buildEscPosImageBuffer(data.logoPngBase64);
+        if (logoBuffer) {
+            parts.push(exports.ESCPOS.ALIGN_CENTER);
+            parts.push(logoBuffer);
+            parts.push(nl);
+        }
+    }
     // ── Cabecera: nombre del negocio
     parts.push(exports.ESCPOS.ALIGN_CENTER);
     parts.push(exports.ESCPOS.BOLD_ON, exports.ESCPOS.DOUBLE_SIZE_ON);
@@ -174,6 +186,7 @@ function buildTicketPreviewText(data) {
     const fecha = data.issuedAt;
     const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth() + 1)}/${fecha.getFullYear()} ${pad(fecha.getHours())}:${pad(fecha.getMinutes())}`;
     const lines = [
+        ...(data.logoPngBase64 ? ['[Logo del negocio]'] : []),
         data.businessName.toUpperCase(),
         data.businessAddress,
         `NIF: ${data.businessNif}`,
@@ -200,6 +213,42 @@ function buildTicketPreviewText(data) {
     lines.push('==========================================');
     lines.push('Gracias por su visita');
     return lines.join('\n');
+}
+function buildEscPosImageBuffer(base64Png) {
+    try {
+        const png = PNG.sync.read(Buffer.from(base64Png, 'base64'));
+        const maxWidth = 384;
+        const targetWidth = Math.min(png.width, maxWidth);
+        const bytesPerRow = Math.ceil(targetWidth / 8);
+        const raster = Buffer.alloc(bytesPerRow * png.height);
+        for (let y = 0; y < png.height; y += 1) {
+            for (let x = 0; x < targetWidth; x += 1) {
+                const idx = (png.width * y + x) << 2;
+                const r = png.data[idx];
+                const g = png.data[idx + 1];
+                const b = png.data[idx + 2];
+                const a = png.data[idx + 3];
+                const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                const isBlack = a > 16 && luminance < 196;
+                if (isBlack) {
+                    const byteIndex = y * bytesPerRow + (x >> 3);
+                    raster[byteIndex] |= 0x80 >> (x & 7);
+                }
+            }
+        }
+        const xL = bytesPerRow & 0xff;
+        const xH = (bytesPerRow >> 8) & 0xff;
+        const yL = png.height & 0xff;
+        const yH = (png.height >> 8) & 0xff;
+        return Buffer.concat([
+            Buffer.from([GS, 0x76, 0x30, 0x00, xL, xH, yL, yH]),
+            raster,
+        ]);
+    }
+    catch (error) {
+        console.error('[Printer] No se pudo rasterizar el logo del ticket', error);
+        return null;
+    }
 }
 /**
  * Construye el buffer ESC/POS de una comanda de cocina.

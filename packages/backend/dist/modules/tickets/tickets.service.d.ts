@@ -115,12 +115,12 @@ export declare function getTicketPreview(ticketId: number): Promise<{
                 venueId: number;
                 status: import(".prisma/client").$Enums.TableStatus;
                 width: number;
+                height: number;
                 seats: number;
                 zone: string | null;
                 posX: number;
                 posY: number;
                 objectType: string;
-                height: number;
             };
             items: ({
                 product: {
@@ -141,8 +141,8 @@ export declare function getTicketPreview(ticketId: number): Promise<{
                 };
             } & {
                 id: number;
-                orderId: number;
                 notes: string | null;
+                orderId: number;
                 productId: number;
                 quantity: number;
                 unitPrice: Prisma.Decimal;
@@ -155,8 +155,8 @@ export declare function getTicketPreview(ticketId: number): Promise<{
             userId: number;
             venueId: number;
             status: import(".prisma/client").$Enums.OrderStatus;
-            tableId: number;
             notes: string | null;
+            tableId: number;
         };
     } & {
         id: number;

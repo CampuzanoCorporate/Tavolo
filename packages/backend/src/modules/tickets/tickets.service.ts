@@ -20,6 +20,7 @@ import { generateVerifactuQrBase64 } from '../verifactu/qr.service';
 import { buildTicketBuffer, buildTicketPreviewText, sendToPrinter } from '../printing/printer.service';
 import { config } from '../../config';
 import { getVisibleNotes } from '../orders/menuSelection';
+import { getTicketLogoBase64 } from '../printing/logo.service';
 
 export interface CloseTicketInput {
   orderId: number;
@@ -98,6 +99,7 @@ function buildPrintableTicketPayload(ticket: {
   businessName: string;
   businessNif: string;
   businessAddress: string;
+  logoPngBase64?: string | null;
   qrBase64?: string | null;
 }, order: {
   table: { number: number };
@@ -130,6 +132,7 @@ function buildPrintableTicketPayload(ticket: {
     vatAmount: parseFloat(ticket.vatAmount.toString()),
     vatRate: dominantVatRate,
     total: parseFloat(ticket.total.toString()),
+    logoPngBase64: ticket.logoPngBase64 ?? undefined,
     qrBase64: ticket.qrBase64 ?? undefined,
   };
 }
@@ -165,6 +168,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
   const effectiveNif     = venue.useOrgNif ? venue.organisation.nif     : (venue.nifOverride  ?? venue.organisation.nif);
   const effectiveName    = venue.useOrgNif ? venue.organisation.name     : (venue.nameOverride ?? venue.organisation.name);
   const effectiveAddress = venue.address ?? venue.organisation.address ?? '';
+  const ticketLogoBase64 = await getTicketLogoBase64(venue.organisationId);
 
   // ── 3. Calcular importes ──────────────────────────────────────────────────
   let subtotal = 0;
@@ -313,7 +317,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
         tableNumber:     order.table.number,
         waiterName:      order.user.name,
         items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitPrice: parseFloat(i.unitPrice.toString()), notes: getVisibleNotes(i.notes) })),
-        subtotal, vatAmount, vatRate: dominantVatRate, total, qrBase64,
+        subtotal, vatAmount, vatRate: dominantVatRate, total, logoPngBase64: ticketLogoBase64, qrBase64,
       });
       await sendToPrinter({ ipAddress: printerIp, port: printerPort }, buf);
     } catch (e) {
@@ -477,7 +481,10 @@ export async function getTicketPreview(ticketId: number) {
     throw new Error('Ticket no encontrado');
   }
 
-  const payload = buildPrintableTicketPayload(ticket, ticket.order);
+  const payload = buildPrintableTicketPayload({
+    ...ticket,
+    logoPngBase64: await getTicketLogoBase64(ticket.order.user.organisationId),
+  }, ticket.order);
 
   return {
     ticket,
@@ -517,7 +524,10 @@ export async function reprintTicket(ticketId: number) {
     throw new Error('No hay impresora de tickets activa en esta sede');
   }
 
-  const payload = buildPrintableTicketPayload(ticket, ticket.order);
+  const payload = buildPrintableTicketPayload({
+    ...ticket,
+    logoPngBase64: await getTicketLogoBase64(ticket.venue.organisationId),
+  }, ticket.order);
   const buffer = buildTicketBuffer(payload);
   await sendToPrinter({ ipAddress: printer.ipAddress, port: printer.port }, buffer);
 

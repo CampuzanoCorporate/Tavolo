@@ -7,6 +7,8 @@ const client_2 = require("@prisma/client");
 const auth_service_1 = require("../auth/auth.service");
 const permissions_1 = require("../auth/permissions");
 const guards_1 = require("../auth/guards");
+const certificate_service_1 = require("../verifactu/certificate.service");
+const logo_service_1 = require("../printing/logo.service");
 // ─── SCHEMAS DE VALIDACIÓN ────────────────────────────────────────────────────
 const VenueCreateSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).max(200),
@@ -25,6 +27,26 @@ const OrgUpdateSchema = zod_1.z.object({
     address: zod_1.z.string().optional(),
     phone: zod_1.z.string().optional(),
     email: zod_1.z.string().email().optional(),
+});
+const FiscalCertificateSchema = zod_1.z.object({
+    label: zod_1.z.string().max(120).optional().nullable(),
+    filename: zod_1.z.string().min(1).max(255),
+    mimeType: zod_1.z.string().max(100).optional().nullable(),
+    base64Content: zod_1.z.string().min(16),
+    passphrase: zod_1.z.string().min(1).max(255),
+});
+const TicketLogoSchema = zod_1.z.object({
+    label: zod_1.z.string().max(120).optional().nullable(),
+    filename: zod_1.z.string().min(1).max(255),
+    mimeType: zod_1.z.string().max(100).optional().nullable(),
+    pngBase64: zod_1.z.string().min(32),
+    width: zod_1.z.number().int().positive().max(1024),
+    height: zod_1.z.number().int().positive().max(1024),
+});
+const QuarterlyReportQuerySchema = zod_1.z.object({
+    year: zod_1.z.coerce.number().int().min(2020).max(2100).optional(),
+    quarter: zod_1.z.coerce.number().int().min(1).max(4).optional(),
+    venueId: zod_1.z.coerce.number().int().positive().optional(),
 });
 const CategorySchema = zod_1.z.object({
     name: zod_1.z.string().min(1).max(100),
@@ -139,6 +161,12 @@ function assertVenueAccess(venueId, userVenueIds, role) {
         throw Object.assign(new Error('Sin acceso a esta sede'), { statusCode: 403 });
     }
 }
+function getQuarterBounds(year, quarter) {
+    const startMonth = (quarter - 1) * 3;
+    const start = new Date(year, startMonth, 1, 0, 0, 0, 0);
+    const end = new Date(year, startMonth + 3, 0, 23, 59, 59, 999);
+    return { start, end };
+}
 function mapProductPayload(body, venueId) {
     return {
         venueId,
@@ -217,6 +245,11 @@ async function adminRoutes(fastify) {
                 return reply;
             return;
         }
+        if (path.includes('/fiscal') || path.includes('/branding')) {
+            if (!(0, guards_1.requirePermission)(request, reply, 'MANAGE_VENUES'))
+                return reply;
+            return;
+        }
     });
     // ── Organización ───────────────────────────────────────────────────────────
     /** GET /api/admin/organisation — Datos de la organización */
@@ -238,13 +271,19 @@ async function adminRoutes(fastify) {
         const todayStart = new Date(now);
         todayStart.setHours(0, 0, 0, 0);
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const [ticketsToday, ticketsMonth, ticketsAll, venues, orderItems] = await Promise.all([
+        const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
+        const { start: quarterStart } = getQuarterBounds(now.getFullYear(), currentQuarter);
+        const [ticketsToday, ticketsMonth, ticketsQuarter, ticketsAll, venues, orderItems, fiscalCertificate, ticketLogo] = await Promise.all([
             client_1.prisma.ticket.findMany({
                 where: { venue: { organisationId }, issuedAt: { gte: todayStart, lte: now } },
                 select: { total: true, issuedAt: true, venueId: true },
             }),
             client_1.prisma.ticket.findMany({
                 where: { venue: { organisationId }, issuedAt: { gte: monthStart, lte: now } },
+                select: { total: true, issuedAt: true, venueId: true },
+            }),
+            client_1.prisma.ticket.findMany({
+                where: { venue: { organisationId }, issuedAt: { gte: quarterStart, lte: now } },
                 select: { total: true, issuedAt: true, venueId: true },
             }),
             client_1.prisma.ticket.findMany({
@@ -260,9 +299,12 @@ async function adminRoutes(fastify) {
                 where: { order: { venue: { organisationId } } },
                 include: { product: { select: { name: true } } },
             }),
+            (0, certificate_service_1.getFiscalCertificateSummary)(organisationId),
+            (0, logo_service_1.getTicketLogoSummary)(organisationId),
         ]);
         const todayTotal = ticketsToday.reduce((sum, ticket) => sum + Number(ticket.total), 0);
         const monthTotal = ticketsMonth.reduce((sum, ticket) => sum + Number(ticket.total), 0);
+        const quarterTotal = ticketsQuarter.reduce((sum, ticket) => sum + Number(ticket.total), 0);
         const totalFactured = ticketsAll.reduce((sum, ticket) => sum + Number(ticket.total), 0);
         const hourlyMap = new Map();
         for (const ticket of ticketsToday) {
@@ -309,6 +351,12 @@ async function adminRoutes(fastify) {
                     billedTotal: Math.round(monthTotal * 100) / 100,
                     ticketCount: ticketsMonth.length,
                 },
+                quarter: {
+                    year: now.getFullYear(),
+                    quarter: currentQuarter,
+                    billedTotal: Math.round(quarterTotal * 100) / 100,
+                    ticketCount: ticketsQuarter.length,
+                },
                 organisation: {
                     billedTotal: Math.round(totalFactured * 100) / 100,
                     venueCount: venues.length,
@@ -316,8 +364,168 @@ async function adminRoutes(fastify) {
                 hourlySales,
                 venueTotals,
                 topProducts,
+                fiscalCertificate,
+                ticketLogo,
             },
         });
+    });
+    fastify.get('/reports/quarterly', async (request, reply) => {
+        if (request.user.role !== 'ADMIN' && request.user.role !== 'MANAGER') {
+            return reply.status(403).send({ error: 'Sin acceso al informe trimestral' });
+        }
+        if (!(0, guards_1.requirePermission)(request, reply, 'VIEW_FINANCIALS'))
+            return;
+        const query = QuarterlyReportQuerySchema.parse(request.query);
+        const now = new Date();
+        const year = query.year ?? now.getFullYear();
+        const quarter = query.quarter ?? Math.floor(now.getMonth() / 3) + 1;
+        const { start, end } = getQuarterBounds(year, quarter);
+        if (query.venueId) {
+            assertVenueAccess(query.venueId, request.user.venueIds, request.user.role);
+        }
+        const venueFilter = query.venueId ? { venueId: query.venueId } : {};
+        const [tickets, venues] = await Promise.all([
+            client_1.prisma.ticket.findMany({
+                where: {
+                    ...venueFilter,
+                    venue: { organisationId: request.user.organisationId },
+                    issuedAt: { gte: start, lte: end },
+                },
+                select: {
+                    id: true,
+                    venueId: true,
+                    issuedAt: true,
+                    total: true,
+                    subtotal: true,
+                    vatAmount: true,
+                    businessNif: true,
+                },
+                orderBy: { issuedAt: 'asc' },
+            }),
+            client_1.prisma.venue.findMany({
+                where: {
+                    organisationId: request.user.organisationId,
+                    ...(query.venueId ? { id: query.venueId } : {}),
+                },
+                select: { id: true, name: true },
+            }),
+        ]);
+        const venueMap = new Map(venues.map((venue) => [venue.id, venue.name]));
+        const monthlyBreakdown = new Map();
+        const venueBreakdown = new Map();
+        let billedTotal = 0;
+        let vatAmount = 0;
+        let netTotal = 0;
+        for (const ticket of tickets) {
+            const gross = Number(ticket.total);
+            const net = Number(ticket.subtotal);
+            const vat = Number(ticket.vatAmount);
+            billedTotal += gross;
+            netTotal += net;
+            vatAmount += vat;
+            const monthKey = `${ticket.issuedAt.getFullYear()}-${String(ticket.issuedAt.getMonth() + 1).padStart(2, '0')}`;
+            const monthLabel = ticket.issuedAt.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+            const monthEntry = monthlyBreakdown.get(monthKey) ?? {
+                label: monthLabel,
+                billedTotal: 0,
+                ticketCount: 0,
+                vatAmount: 0,
+            };
+            monthEntry.billedTotal += gross;
+            monthEntry.ticketCount += 1;
+            monthEntry.vatAmount += vat;
+            monthlyBreakdown.set(monthKey, monthEntry);
+            const venueEntry = venueBreakdown.get(ticket.venueId) ?? {
+                venueId: ticket.venueId,
+                venueName: venueMap.get(ticket.venueId) ?? `Sede ${ticket.venueId}`,
+                billedTotal: 0,
+                ticketCount: 0,
+                vatAmount: 0,
+            };
+            venueEntry.billedTotal += gross;
+            venueEntry.ticketCount += 1;
+            venueEntry.vatAmount += vat;
+            venueBreakdown.set(ticket.venueId, venueEntry);
+        }
+        return reply.send({
+            data: {
+                year,
+                quarter,
+                start: start.toISOString(),
+                end: end.toISOString(),
+                ticketCount: tickets.length,
+                billedTotal: Math.round(billedTotal * 100) / 100,
+                netTotal: Math.round(netTotal * 100) / 100,
+                vatAmount: Math.round(vatAmount * 100) / 100,
+                monthlyBreakdown: Array.from(monthlyBreakdown.values()).map((entry) => ({
+                    ...entry,
+                    billedTotal: Math.round(entry.billedTotal * 100) / 100,
+                    vatAmount: Math.round(entry.vatAmount * 100) / 100,
+                })),
+                venueBreakdown: Array.from(venueBreakdown.values())
+                    .sort((a, b) => b.billedTotal - a.billedTotal)
+                    .map((entry) => ({
+                    ...entry,
+                    billedTotal: Math.round(entry.billedTotal * 100) / 100,
+                    vatAmount: Math.round(entry.vatAmount * 100) / 100,
+                })),
+            },
+        });
+    });
+    fastify.get('/fiscal/certificate', async (request, reply) => {
+        return reply.send({
+            data: await (0, certificate_service_1.getFiscalCertificateSummary)(request.user.organisationId),
+        });
+    });
+    fastify.put('/fiscal/certificate', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede actualizar el certificado fiscal' });
+        }
+        const body = FiscalCertificateSchema.parse(request.body);
+        const certificate = await (0, certificate_service_1.saveFiscalCertificate)({
+            organisationId: request.user.organisationId,
+            filename: body.filename,
+            mimeType: body.mimeType,
+            label: body.label,
+            base64Content: body.base64Content,
+            passphrase: body.passphrase,
+        });
+        return reply.send({ data: certificate });
+    });
+    fastify.delete('/fiscal/certificate', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede eliminar el certificado fiscal' });
+        }
+        await (0, certificate_service_1.deleteFiscalCertificate)(request.user.organisationId);
+        return reply.send({ success: true });
+    });
+    fastify.get('/branding/ticket-logo', async (request, reply) => {
+        return reply.send({
+            data: await (0, logo_service_1.getTicketLogoSummary)(request.user.organisationId),
+        });
+    });
+    fastify.put('/branding/ticket-logo', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede actualizar el logotipo del ticket' });
+        }
+        const body = TicketLogoSchema.parse(request.body);
+        const logo = await (0, logo_service_1.saveTicketLogo)({
+            organisationId: request.user.organisationId,
+            label: body.label,
+            filename: body.filename,
+            mimeType: body.mimeType,
+            pngBase64: body.pngBase64,
+            width: body.width,
+            height: body.height,
+        });
+        return reply.send({ data: logo });
+    });
+    fastify.delete('/branding/ticket-logo', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede eliminar el logotipo del ticket' });
+        }
+        await (0, logo_service_1.deleteTicketLogo)(request.user.organisationId);
+        return reply.send({ success: true });
     });
     /** PUT /api/admin/organisation — Actualizar datos fiscales/contacto */
     fastify.put('/organisation', async (request, reply) => {

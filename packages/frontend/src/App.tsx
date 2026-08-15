@@ -18,6 +18,7 @@ import { UsersAdminPage } from './pages/admin/UsersAdminPage';
 import { TablesAdminPage } from './pages/admin/TablesAdminPage';
 import { PrintersAdminPage } from './pages/admin/PrintersAdminPage';
 import { TicketsLogPage } from './pages/admin/TicketsLogPage';
+import { FiscalAdminPage } from './pages/admin/FiscalAdminPage';
 import { LicensingPage } from './pages/admin/LicensingPage';
 import { useAppStore } from './store/useAppStore';
 import { countPendingOrders } from './services/offlineStorage';
@@ -291,6 +292,7 @@ export default function App() {
           <Route path="venues/:id/printers" element={<PrintersAdminPage />} />
           <Route path="products" element={<ProductsAdminPage />} />
           <Route path="users" element={<UsersAdminPage />} />
+          <Route path="fiscal" element={<FiscalAdminPage />} />
           <Route path="licensing" element={<LicensingPage />} />
           <Route path="tickets" element={<TicketsLogPage />} />
         </Route>

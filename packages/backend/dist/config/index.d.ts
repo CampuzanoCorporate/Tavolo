@@ -30,6 +30,9 @@ export declare const config: {
     readonly aeat: {
         readonly endpointUrl: string;
     };
+    readonly certificates: {
+        readonly encryptionSecret: string;
+    };
     readonly licensing: {
         readonly masterKey: string;
         readonly defaultValidityDays: number;

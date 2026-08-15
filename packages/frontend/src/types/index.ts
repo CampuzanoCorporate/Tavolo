@@ -43,6 +43,19 @@ export interface Organisation {
   isActive: boolean;
 }
 
+export interface TicketLogoSummary {
+  id: number;
+  organisationId: number;
+  label: string | null;
+  originalFilename: string;
+  mimeType: string | null;
+  width: number;
+  height: number;
+  fileSizeBytes: number;
+  uploadedAt: string;
+  updatedAt: string;
+}
+
 export interface Venue {
   id: number;
   organisationId: number;
@@ -102,6 +115,12 @@ export interface OwnerDashboardMetrics {
     billedTotal: number;
     ticketCount: number;
   };
+  quarter: {
+    year: number;
+    quarter: number;
+    billedTotal: number;
+    ticketCount: number;
+  };
   organisation: {
     billedTotal: number;
     venueCount: number;
@@ -109,6 +128,44 @@ export interface OwnerDashboardMetrics {
   hourlySales: Array<{ hour: number; total: number }>;
   venueTotals: Array<{ venueId: number; venueName: string; ticketCount: number; billedTotal: number }>;
   topProducts: Array<{ productName: string; quantity: number; revenue: number }>;
+  fiscalCertificate: FiscalCertificateSummary | null;
+  ticketLogo: TicketLogoSummary | null;
+}
+
+export interface FiscalCertificateSummary {
+  id: number;
+  organisationId: number;
+  label: string | null;
+  originalFilename: string;
+  mimeType: string | null;
+  fileSizeBytes: number;
+  fileSha256: string;
+  uploadedAt: string;
+  updatedAt: string;
+}
+
+export interface QuarterlyReport {
+  year: number;
+  quarter: number;
+  start: string;
+  end: string;
+  ticketCount: number;
+  billedTotal: number;
+  netTotal: number;
+  vatAmount: number;
+  monthlyBreakdown: Array<{
+    label: string;
+    billedTotal: number;
+    ticketCount: number;
+    vatAmount: number;
+  }>;
+  venueBreakdown: Array<{
+    venueId: number;
+    venueName: string;
+    billedTotal: number;
+    ticketCount: number;
+    vatAmount: number;
+  }>;
 }
 
 export interface AuthResponse {

@@ -62,6 +62,8 @@ export interface PrintTicketData {
     vatAmount: number;
     vatRate: number;
     total: number;
+    /** Logotipo PNG en base64, ya normalizado para impresión */
+    logoPngBase64?: string | null;
     /** QR de cotejo Veri*factu (Base64 PNG) — opcional */
     qrBase64?: string;
 }

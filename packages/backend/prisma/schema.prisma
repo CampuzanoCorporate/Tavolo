@@ -28,6 +28,8 @@ model Organisation {
   venues   Venue[]
   users    User[]
   licenses License[]
+  fiscalCertificate FiscalCertificate?
+  ticketLogo TicketLogo?
 
   @@map("organisations")
 }
@@ -507,6 +509,45 @@ model License {
   @@index([organisationId])
   @@index([status, validUntil])
   @@map("licenses")
+}
+
+model FiscalCertificate {
+  id                   Int          @id @default(autoincrement())
+  organisationId       Int          @unique
+  organisation         Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  label                String?      @db.VarChar(120)
+  originalFilename     String       @db.VarChar(255)
+  mimeType             String?      @db.VarChar(100)
+  fileSizeBytes        Int
+  encryptionVersion    Int          @default(1)
+  fileCiphertext       Bytes
+  fileIv               Bytes
+  fileAuthTag          Bytes
+  passphraseCiphertext Bytes
+  passphraseIv         Bytes
+  passphraseAuthTag    Bytes
+  fileSha256           String       @db.Char(64)
+  uploadedAt           DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@map("fiscal_certificates")
+}
+
+model TicketLogo {
+  id               Int          @id @default(autoincrement())
+  organisationId   Int          @unique
+  organisation     Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  label            String?      @db.VarChar(120)
+  originalFilename String       @db.VarChar(255)
+  mimeType         String?      @db.VarChar(100)
+  width            Int
+  height           Int
+  fileSizeBytes    Int
+  pngBase64        String       @db.Text
+  uploadedAt       DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@map("ticket_logos")
 }
 
 enum AeatStatus {

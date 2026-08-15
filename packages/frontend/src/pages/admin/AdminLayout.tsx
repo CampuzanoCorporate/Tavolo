@@ -10,11 +10,12 @@ const NAV_ITEMS = [
   { to: '/admin/venues',   label: 'Sedes', icon: 'venues' as const, permission: 'MANAGE_VENUES' as AppPermission },
   { to: '/admin/products', label: 'Catálogo', icon: 'catalog' as const, permission: 'MANAGE_CATALOG' as AppPermission },
   { to: '/admin/users',    label: 'Usuarios', icon: 'users' as const, permission: 'MANAGE_USERS' as AppPermission },
+  { to: '/admin/fiscal',   label: 'Fiscal', icon: 'fiscal' as const, permission: 'MANAGE_VENUES' as AppPermission },
   { to: '/admin/licensing', label: 'Licencia', icon: 'license' as const, permission: 'MANAGE_VENUES' as AppPermission },
   { to: '/admin/tickets',  label: 'Histórico', icon: 'history' as const, permission: 'VIEW_FINANCIALS' as AppPermission },
 ];
 
-function AdminNavIcon({ type }: { type: 'dashboard' | 'venues' | 'catalog' | 'users' | 'license' | 'history' }) {
+function AdminNavIcon({ type }: { type: 'dashboard' | 'venues' | 'catalog' | 'users' | 'fiscal' | 'license' | 'history' }) {
   const commonProps = {
     viewBox: '0 0 24 24',
     fill: 'none',
@@ -60,6 +61,15 @@ function AdminNavIcon({ type }: { type: 'dashboard' | 'venues' | 'catalog' | 'us
           <circle cx="9.5" cy="7" r="3" />
           <path d="M20 21v-2a4 4 0 0 0-3-3.87" />
           <path d="M16 4.13a3 3 0 0 1 0 5.74" />
+        </svg>
+      );
+    case 'fiscal':
+      return (
+        <svg {...commonProps}>
+          <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+          <path d="M14 3v5h5" />
+          <path d="M9 13h6" />
+          <path d="M9 17h6" />
         </svg>
       );
     case 'license':
