@@ -4,7 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { buildCommandaPreviewText, buildTicketPreviewText, ESCPOS, sendToPrinter } from '../printing/printer.service';
+import { buildCommandaPreviewText, buildTicketPreviewText, ESCPOS, listSystemPrinters, sendToPrinter } from '../printing/printer.service';
 import { requirePermission } from '../auth/guards';
 
 export async function productsRoutes(fastify: FastifyInstance) {
@@ -36,6 +36,11 @@ export async function productsRoutes(fastify: FastifyInstance) {
       orderBy: { sortOrder: 'asc' },
     });
     return reply.send({ data: categories });
+  });
+
+  fastify.get('/system', async (_request, reply) => {
+    const printers = await listSystemPrinters();
+    return reply.send({ data: printers });
   });
 }
 
@@ -87,7 +92,12 @@ export async function printersRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No hay impresoras activas para abrir el cajon' });
     }
 
-    await sendToPrinter({ ipAddress: printer.ipAddress, port: printer.port }, ESCPOS.OPEN_DRAWER);
+    await sendToPrinter({
+      connectionType: printer.connectionType,
+      ipAddress: printer.ipAddress ?? undefined,
+      port: printer.port ?? undefined,
+      systemName: printer.systemName ?? undefined,
+    }, ESCPOS.OPEN_DRAWER);
     return reply.send({ success: true });
   });
 

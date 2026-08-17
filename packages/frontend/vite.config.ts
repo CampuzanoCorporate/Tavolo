@@ -29,8 +29,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
-            // API: Network-first, fallback a caché
-            urlPattern: /^http:\/\/localhost:3001\/api\/.*/i,
+            // API: Network-first sobre la misma origin en dev/prod
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'tavolo-api-cache',
@@ -52,7 +52,9 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, './src') },
   },
   server: {
+    host: '0.0.0.0',
     port: 5173,
+    allowedHosts: ['tavolo.campuzanodrive.es'],
     proxy: {
       // Proxy para desarrollo — evita CORS
       '/api': {

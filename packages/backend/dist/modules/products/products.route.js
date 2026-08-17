@@ -35,6 +35,10 @@ async function productsRoutes(fastify) {
         });
         return reply.send({ data: categories });
     });
+    fastify.get('/system', async (_request, reply) => {
+        const printers = await (0, printer_service_1.listSystemPrinters)();
+        return reply.send({ data: printers });
+    });
 }
 async function printersRoutes(fastify) {
     fastify.addHook('onRequest', fastify.authenticate);
@@ -77,7 +81,12 @@ async function printersRoutes(fastify) {
         if (!printer) {
             return reply.status(404).send({ error: 'No hay impresoras activas para abrir el cajon' });
         }
-        await (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, printer_service_1.ESCPOS.OPEN_DRAWER);
+        await (0, printer_service_1.sendToPrinter)({
+            connectionType: printer.connectionType,
+            ipAddress: printer.ipAddress ?? undefined,
+            port: printer.port ?? undefined,
+            systemName: printer.systemName ?? undefined,
+        }, printer_service_1.ESCPOS.OPEN_DRAWER);
         return reply.send({ success: true });
     });
     /** GET /api/printers/preview-samples?venueId= */

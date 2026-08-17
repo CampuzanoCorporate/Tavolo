@@ -15,7 +15,7 @@ import {
   formatDateForHash,
   EMPTY_PREVIOUS_HASH,
 } from '../verifactu/hash.service';
-import { buildVerifactuPayload, signVerifactuPayload, sendToAeat } from '../verifactu/sign.service';
+import { buildTicketBreakdown, submitVerifactuRecord } from '../verifactu/aeat.service';
 import { generateVerifactuQrBase64 } from '../verifactu/qr.service';
 import { buildTicketBuffer, buildTicketPreviewText, sendToPrinter } from '../printing/printer.service';
 import { config } from '../../config';
@@ -189,13 +189,14 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
 
   // ── 4 + 5. Transacción atómica: numeración + hash + inserción ─────────────
   // SELECT FOR UPDATE garantiza correlatividad sin saltos, incluso con concurrencia.
-  const ticket = await prisma.$transaction(async (tx) => {
+  const ticketContext = await prisma.$transaction(async (tx) => {
     const lastTickets = await tx.$queryRaw<Array<{
       invoiceNumber: number;
       invoiceCode: string;
       hashSelf: string;
+      issuedAt: Date;
     }>>`
-      SELECT "invoiceNumber", "invoiceCode", "hashSelf"
+      SELECT "invoiceNumber", "invoiceCode", "hashSelf", "issuedAt"
       FROM "tickets"
       WHERE "venueId" = ${venueId} AND "invoiceSeries" = ${venue.invoiceSeries}
       ORDER BY "invoiceNumber" DESC
@@ -215,7 +216,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
       idEmisorFactura:  effectiveNif,
       numSerieFactura:  invoiceCode,
       fechaExpedicion:  formatDateForHash(issuedAt),
-      tipoFactura:      'F1',
+      tipoFactura:      'F2',
       cuotaTotal:       formatDecimalForHash(vatAmount),
       importeTotal:     formatDecimalForHash(total),
       huellaAnterior:   previousHash,
@@ -273,8 +274,18 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
     await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CLOSED } });
     await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.FREE } });
 
-    return newTicket;
+    return {
+      ticket: newTicket,
+      previousTicket: last
+        ? {
+            invoiceCode: last.invoiceCode,
+            issuedAt: last.issuedAt,
+            hashSelf: last.hashSelf,
+          }
+        : null,
+    };
   });
+  const { ticket, previousTicket } = ticketContext;
 
   // ── 6. QR de cotejo Veri*factu ────────────────────────────────────────────
   let qrBase64: string | undefined;
@@ -291,14 +302,46 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
   }
 
   // ── 7. Envío asíncrono a AEAT ─────────────────────────────────────────────
-  const verifactuPayload = buildVerifactuPayload({ nif: effectiveNif, invoiceCode: ticket.invoiceCode, issuedAt: ticket.issuedAt, tipoFactura: 'F1', vatAmount, total, hashSelf: ticket.hashSelf, hashPrevious: ticket.hashPrevious });
-  const signedPayload = signVerifactuPayload(verifactuPayload);
+  const aeatBreakdown = buildTicketBreakdown(order.items);
 
-  sendToAeat(signedPayload)
+  submitVerifactuRecord({
+    organisationId: venue.organisationId,
+    invoiceCode: ticket.invoiceCode,
+    issuedAt: ticket.issuedAt,
+    effectiveNif,
+    effectiveName: effectiveName,
+    description: `Ticket TPV mesa ${order.table.number}`,
+    invoiceKind: 'F2',
+    total,
+    vatAmount,
+    hashSelf: ticket.hashSelf,
+    previousRecord: previousTicket
+      ? {
+          invoiceCode: previousTicket.invoiceCode,
+          issuedAt: previousTicket.issuedAt,
+          hash: previousTicket.hashSelf,
+        }
+      : null,
+    breakdown: aeatBreakdown,
+    refExternal: `ticket-${ticket.id}`,
+  })
     .then(async (r) => {
       await prisma.ticket.update({
         where: { id: ticket.id },
-        data: { aeatStatus: r.code === '2000' ? 'ACCEPTED' : 'REJECTED', aeatSentAt: new Date(), aeatResponseCode: r.code, aeatResponseMsg: r.message, aeatPayloadJson: JSON.stringify(signedPayload.payload) },
+        data: {
+          aeatStatus: r.lineStatus === 'Incorrecto' ? 'REJECTED' : (r.isSimulated ? 'SENT' : 'ACCEPTED'),
+          aeatSentAt: new Date(),
+          aeatResponseCode: r.code,
+          aeatResponseMsg: r.message,
+          aeatPayloadJson: JSON.stringify({
+            requestXml: r.requestXml,
+            responseXml: r.responseXml ?? null,
+            csv: r.csv ?? null,
+            globalStatus: r.globalStatus,
+            lineStatus: r.lineStatus,
+            simulated: r.isSimulated,
+          }),
+        },
       });
     })
     .catch(async (e) => {
@@ -319,7 +362,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
         items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitPrice: parseFloat(i.unitPrice.toString()), notes: getVisibleNotes(i.notes) })),
         subtotal, vatAmount, vatRate: dominantVatRate, total, logoPngBase64: ticketLogoBase64, qrBase64,
       });
-      await sendToPrinter({ ipAddress: printerIp, port: printerPort }, buf);
+      await sendToPrinter({ connectionType: 'NETWORK', ipAddress: printerIp, port: printerPort }, buf);
     } catch (e) {
       console.error('[Printing] Error al imprimir ticket:', e);
     }
@@ -529,7 +572,12 @@ export async function reprintTicket(ticketId: number) {
     logoPngBase64: await getTicketLogoBase64(ticket.venue.organisationId),
   }, ticket.order);
   const buffer = buildTicketBuffer(payload);
-  await sendToPrinter({ ipAddress: printer.ipAddress, port: printer.port }, buffer);
+  await sendToPrinter({
+    connectionType: printer.connectionType,
+    ipAddress: printer.ipAddress ?? undefined,
+    port: printer.port ?? undefined,
+    systemName: printer.systemName ?? undefined,
+  }, buffer);
 
   return { success: true };
 }

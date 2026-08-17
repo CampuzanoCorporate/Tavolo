@@ -142,11 +142,11 @@ export declare function getTicketPreview(ticketId: number): Promise<{
             } & {
                 id: number;
                 notes: string | null;
+                vatRate: Prisma.Decimal;
                 orderId: number;
                 productId: number;
                 quantity: number;
                 unitPrice: Prisma.Decimal;
-                vatRate: Prisma.Decimal;
             })[];
         } & {
             id: number;

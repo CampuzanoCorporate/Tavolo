@@ -567,14 +567,23 @@ model Printer {
   venueId   Int
   venue     Venue       @relation(fields: [venueId], references: [id])
   name      String      @db.VarChar(100)
-  ipAddress String      @db.VarChar(45)
-  port      Int         @default(9100)
+  connectionType PrinterConnectionType @default(NETWORK)
+  ipAddress String?     @db.VarChar(45)
+  port      Int?
+  systemName String?    @db.VarChar(255)
   type      PrinterType @default(RECEIPT)
   isActive  Boolean     @default(true)
   productionStations ProductionStation[]
 
   @@index([venueId, type, isActive])
   @@map("printers")
+}
+
+enum PrinterConnectionType {
+  NETWORK
+  SYSTEM
+
+  @@map("printer_connection_type")
 }
 
 enum PrinterType {

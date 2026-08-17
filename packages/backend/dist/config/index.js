@@ -51,12 +51,23 @@ exports.config = {
     },
     /**
      * Configuración del módulo Veri*factu / AEAT.
-     * En producción, descomentar y configurar la ruta al certificado FNMT.
+     * La remisión VERI*FACTU usa el certificado cargado desde administración.
      */
     aeat: {
-        endpointUrl: optional('AEAT_ENDPOINT_URL', 'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/FacturaSimplificada'),
-        // certPath: optional('CERT_PATH', ''),
-        // certPassword: optional('CERT_PASSWORD', ''),
+        deliveryMode: optional('AEAT_DELIVERY_MODE', 'simulate'),
+        endpointUrl: optional('AEAT_ENDPOINT_URL', 'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP'),
+        timeoutMs: parseInt(optional('AEAT_TIMEOUT_MS', '15000'), 10),
+        software: {
+            developerName: optional('AEAT_SOFTWARE_DEVELOPER_NAME', 'Tavolo POS'),
+            developerNif: optional('AEAT_SOFTWARE_DEVELOPER_NIF', ''),
+            softwareName: optional('AEAT_SOFTWARE_NAME', 'TAVOLOPOS'),
+            softwareId: optional('AEAT_SOFTWARE_ID', '01'),
+            softwareVersion: optional('AEAT_SOFTWARE_VERSION', '1.0.0'),
+            installationId: optional('AEAT_SOFTWARE_INSTALLATION_ID', 'default'),
+            onlyVerifactu: optional('AEAT_SOFTWARE_ONLY_VERIFACTU', 'S'),
+            multiObligado: optional('AEAT_SOFTWARE_MULTI_OT', 'N'),
+            multipleObligadoIndicator: optional('AEAT_SOFTWARE_MULTIPLE_OT_INDICATOR', 'N'),
+        },
     },
     certificates: {
         encryptionSecret: optional('CERT_ENCRYPTION_SECRET', required('JWT_SECRET')),

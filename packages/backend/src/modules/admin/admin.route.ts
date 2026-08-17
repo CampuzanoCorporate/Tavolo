@@ -152,12 +152,61 @@ const TableAdminSchema = z.object({
   height: z.number().int().nonnegative().optional().default(0),
 });
 
-const PrinterSchema = z.object({
+const PrinterBaseSchema = z.object({
   name: z.string().min(1).max(100),
-  ipAddress: z.string().ip(),
-  port: z.number().int().min(1).max(65535).default(9100),
+  connectionType: z.enum(['NETWORK', 'SYSTEM']).default('NETWORK'),
+  ipAddress: z.string().ip().optional().nullable(),
+  port: z.number().int().min(1).max(65535).optional().nullable(),
+  systemName: z.string().min(1).max(255).optional().nullable(),
   type: z.enum(['RECEIPT', 'KITCHEN', 'BAR']).default('RECEIPT'),
   isActive: z.boolean().default(true),
+});
+
+const PrinterSchema = PrinterBaseSchema.superRefine((printer, ctx) => {
+  if (printer.connectionType === 'NETWORK') {
+    if (!printer.ipAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'La impresora de red necesita IP',
+        path: ['ipAddress'],
+      });
+    }
+    if (!printer.port) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'La impresora de red necesita puerto',
+        path: ['port'],
+      });
+    }
+  }
+
+  if (printer.connectionType === 'SYSTEM' && !printer.systemName) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'La impresora del sistema necesita un nombre configurado',
+      path: ['systemName'],
+    });
+  }
+});
+
+const PrinterUpdateSchema = PrinterBaseSchema.partial().superRefine((printer, ctx) => {
+  if (printer.connectionType === 'NETWORK') {
+    if ('ipAddress' in printer && !printer.ipAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'La impresora de red necesita IP',
+        path: ['ipAddress'],
+      });
+    }
+  }
+
+  if (printer.connectionType === 'SYSTEM' && 'systemName' in printer && !printer.systemName) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'La impresora del sistema necesita un nombre configurado',
+      path: ['systemName'],
+    });
+  }
 });
 
 const ProductionStationSchema = z.object({
@@ -999,7 +1048,18 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const venueId = parseInt(request.params.id, 10);
     assertVenueAccess(venueId, request.user.venueIds, request.user.role);
     const body = PrinterSchema.parse(request.body);
-    const printer = await prisma.printer.create({ data: { ...body, venueId } });
+    const printer = await prisma.printer.create({
+      data: {
+        venueId,
+        name: body.name,
+        connectionType: body.connectionType,
+        ipAddress: body.connectionType === 'NETWORK' ? (body.ipAddress ?? null) : null,
+        port: body.connectionType === 'NETWORK' ? (body.port ?? 9100) : null,
+        systemName: body.connectionType === 'SYSTEM' ? (body.systemName ?? null) : null,
+        type: body.type,
+        isActive: body.isActive,
+      },
+    });
     return reply.status(201).send({ data: printer });
   });
 
@@ -1009,8 +1069,30 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const p = await prisma.printer.findUnique({ where: { id } });
     if (!p) return reply.status(404).send({ error: 'Impresora no encontrada' });
     assertVenueAccess(p.venueId, request.user.venueIds, request.user.role);
-    const body = PrinterSchema.partial().parse(request.body);
-    const updated = await prisma.printer.update({ where: { id }, data: body });
+    const body = PrinterUpdateSchema.parse(request.body);
+    const updated = await prisma.printer.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.connectionType !== undefined ? { connectionType: body.connectionType } : {}),
+        ...(body.connectionType === 'NETWORK'
+          ? {
+              ipAddress: body.ipAddress ?? null,
+              port: body.port ?? 9100,
+              systemName: null,
+            }
+          : {}),
+        ...(body.connectionType === 'SYSTEM'
+          ? {
+              ipAddress: null,
+              port: null,
+              systemName: body.systemName ?? null,
+            }
+          : {}),
+        ...(body.type !== undefined ? { type: body.type } : {}),
+        ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
+      },
+    });
     return reply.send({ data: updated });
   });
 

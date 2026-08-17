@@ -20,7 +20,7 @@ exports.closeCashRegister = closeCashRegister;
 const client_1 = require("@prisma/client");
 const client_2 = require("../../db/client");
 const hash_service_1 = require("../verifactu/hash.service");
-const sign_service_1 = require("../verifactu/sign.service");
+const aeat_service_1 = require("../verifactu/aeat.service");
 const qr_service_1 = require("../verifactu/qr.service");
 const printer_service_1 = require("../printing/printer.service");
 const config_1 = require("../../config");
@@ -105,9 +105,9 @@ async function closeTicket(input) {
     const dominantVatRate = parseFloat(order.items[0]?.vatRate.toString() ?? '10');
     // ── 4 + 5. Transacción atómica: numeración + hash + inserción ─────────────
     // SELECT FOR UPDATE garantiza correlatividad sin saltos, incluso con concurrencia.
-    const ticket = await client_2.prisma.$transaction(async (tx) => {
+    const ticketContext = await client_2.prisma.$transaction(async (tx) => {
         const lastTickets = await tx.$queryRaw `
-      SELECT "invoiceNumber", "invoiceCode", "hashSelf"
+      SELECT "invoiceNumber", "invoiceCode", "hashSelf", "issuedAt"
       FROM "tickets"
       WHERE "venueId" = ${venueId} AND "invoiceSeries" = ${venue.invoiceSeries}
       ORDER BY "invoiceNumber" DESC
@@ -125,7 +125,7 @@ async function closeTicket(input) {
             idEmisorFactura: effectiveNif,
             numSerieFactura: invoiceCode,
             fechaExpedicion: (0, hash_service_1.formatDateForHash)(issuedAt),
-            tipoFactura: 'F1',
+            tipoFactura: 'F2',
             cuotaTotal: (0, hash_service_1.formatDecimalForHash)(vatAmount),
             importeTotal: (0, hash_service_1.formatDecimalForHash)(total),
             huellaAnterior: previousHash,
@@ -180,8 +180,18 @@ async function closeTicket(input) {
         }
         await tx.order.update({ where: { id: orderId }, data: { status: client_1.OrderStatus.CLOSED } });
         await tx.table.update({ where: { id: order.tableId }, data: { status: client_1.TableStatus.FREE } });
-        return newTicket;
+        return {
+            ticket: newTicket,
+            previousTicket: last
+                ? {
+                    invoiceCode: last.invoiceCode,
+                    issuedAt: last.issuedAt,
+                    hashSelf: last.hashSelf,
+                }
+                : null,
+        };
     });
+    const { ticket, previousTicket } = ticketContext;
     // ── 6. QR de cotejo Veri*factu ────────────────────────────────────────────
     let qrBase64;
     try {
@@ -194,13 +204,45 @@ async function closeTicket(input) {
         console.warn('[Tickets] Error generando QR:', e);
     }
     // ── 7. Envío asíncrono a AEAT ─────────────────────────────────────────────
-    const verifactuPayload = (0, sign_service_1.buildVerifactuPayload)({ nif: effectiveNif, invoiceCode: ticket.invoiceCode, issuedAt: ticket.issuedAt, tipoFactura: 'F1', vatAmount, total, hashSelf: ticket.hashSelf, hashPrevious: ticket.hashPrevious });
-    const signedPayload = (0, sign_service_1.signVerifactuPayload)(verifactuPayload);
-    (0, sign_service_1.sendToAeat)(signedPayload)
+    const aeatBreakdown = (0, aeat_service_1.buildTicketBreakdown)(order.items);
+    (0, aeat_service_1.submitVerifactuRecord)({
+        organisationId: venue.organisationId,
+        invoiceCode: ticket.invoiceCode,
+        issuedAt: ticket.issuedAt,
+        effectiveNif,
+        effectiveName: effectiveName,
+        description: `Ticket TPV mesa ${order.table.number}`,
+        invoiceKind: 'F2',
+        total,
+        vatAmount,
+        hashSelf: ticket.hashSelf,
+        previousRecord: previousTicket
+            ? {
+                invoiceCode: previousTicket.invoiceCode,
+                issuedAt: previousTicket.issuedAt,
+                hash: previousTicket.hashSelf,
+            }
+            : null,
+        breakdown: aeatBreakdown,
+        refExternal: `ticket-${ticket.id}`,
+    })
         .then(async (r) => {
         await client_2.prisma.ticket.update({
             where: { id: ticket.id },
-            data: { aeatStatus: r.code === '2000' ? 'ACCEPTED' : 'REJECTED', aeatSentAt: new Date(), aeatResponseCode: r.code, aeatResponseMsg: r.message, aeatPayloadJson: JSON.stringify(signedPayload.payload) },
+            data: {
+                aeatStatus: r.lineStatus === 'Incorrecto' ? 'REJECTED' : (r.isSimulated ? 'SENT' : 'ACCEPTED'),
+                aeatSentAt: new Date(),
+                aeatResponseCode: r.code,
+                aeatResponseMsg: r.message,
+                aeatPayloadJson: JSON.stringify({
+                    requestXml: r.requestXml,
+                    responseXml: r.responseXml ?? null,
+                    csv: r.csv ?? null,
+                    globalStatus: r.globalStatus,
+                    lineStatus: r.lineStatus,
+                    simulated: r.isSimulated,
+                }),
+            },
         });
     })
         .catch(async (e) => {
@@ -220,7 +262,7 @@ async function closeTicket(input) {
                 items: order.items.map((i) => ({ name: i.product.name, quantity: i.quantity, unitPrice: parseFloat(i.unitPrice.toString()), notes: (0, menuSelection_1.getVisibleNotes)(i.notes) })),
                 subtotal, vatAmount, vatRate: dominantVatRate, total, logoPngBase64: ticketLogoBase64, qrBase64,
             });
-            await (0, printer_service_1.sendToPrinter)({ ipAddress: printerIp, port: printerPort }, buf);
+            await (0, printer_service_1.sendToPrinter)({ connectionType: 'NETWORK', ipAddress: printerIp, port: printerPort }, buf);
         }
         catch (e) {
             console.error('[Printing] Error al imprimir ticket:', e);
@@ -394,7 +436,12 @@ async function reprintTicket(ticketId) {
         logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.venue.organisationId),
     }, ticket.order);
     const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
-    await (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, buffer);
+    await (0, printer_service_1.sendToPrinter)({
+        connectionType: printer.connectionType,
+        ipAddress: printer.ipAddress ?? undefined,
+        port: printer.port ?? undefined,
+        systemName: printer.systemName ?? undefined,
+    }, buffer);
     return { success: true };
 }
 async function getCashSummary(venueId) {

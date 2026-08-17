@@ -133,7 +133,12 @@ async function printProductionEntries(params) {
                 notes: entry.notes,
             })),
         });
-        await (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, buf);
+        await (0, printer_service_1.sendToPrinter)({
+            connectionType: printer.connectionType,
+            ipAddress: printer.ipAddress ?? undefined,
+            port: printer.port ?? undefined,
+            systemName: printer.systemName ?? undefined,
+        }, buf);
     }));
 }
 async function ordersRoutes(fastify) {
@@ -463,7 +468,12 @@ async function ordersRoutes(fastify) {
                 createdAt: new Date(),
             });
             try {
-                await Promise.all(kitchenPrinters.map((printer) => (0, printer_service_1.sendToPrinter)({ ipAddress: printer.ipAddress, port: printer.port }, buf)));
+                await Promise.all(kitchenPrinters.map((printer) => (0, printer_service_1.sendToPrinter)({
+                    connectionType: printer.connectionType,
+                    ipAddress: printer.ipAddress ?? undefined,
+                    port: printer.port ?? undefined,
+                    systemName: printer.systemName ?? undefined,
+                }, buf)));
             }
             catch (e) {
                 console.warn('[Printers] Error al imprimir aviso a cocina:', e);

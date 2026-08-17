@@ -170,11 +170,11 @@ async function main() {
     // ── 6. Impresoras ─────────────────────────────────────────────────────────
     await prisma.printer.createMany({
         data: [
-            { venueId: venueCentro.id, name: 'Impresora Caja', ipAddress: '192.168.1.100', port: 9100, type: 'RECEIPT' },
-            { venueId: venueCentro.id, name: 'Impresora Cocina', ipAddress: '192.168.1.101', port: 9100, type: 'KITCHEN' },
-            { venueId: venueCentro.id, name: 'Impresora Barra', ipAddress: '192.168.1.102', port: 9100, type: 'BAR' },
-            { venueId: venueNorte.id, name: 'Caja Norte', ipAddress: '192.168.2.100', port: 9100, type: 'RECEIPT' },
-            { venueId: venueNorte.id, name: 'Cocina Norte', ipAddress: '192.168.2.101', port: 9100, type: 'KITCHEN' },
+            { venueId: venueCentro.id, name: 'Impresora Caja', connectionType: 'NETWORK', ipAddress: '192.168.1.100', port: 9100, type: 'RECEIPT' },
+            { venueId: venueCentro.id, name: 'Impresora Cocina', connectionType: 'NETWORK', ipAddress: '192.168.1.101', port: 9100, type: 'KITCHEN' },
+            { venueId: venueCentro.id, name: 'Impresora Barra', connectionType: 'NETWORK', ipAddress: '192.168.1.102', port: 9100, type: 'BAR' },
+            { venueId: venueNorte.id, name: 'Caja Norte', connectionType: 'NETWORK', ipAddress: '192.168.2.100', port: 9100, type: 'RECEIPT' },
+            { venueId: venueNorte.id, name: 'Cocina Norte', connectionType: 'NETWORK', ipAddress: '192.168.2.101', port: 9100, type: 'KITCHEN' },
         ],
         skipDuplicates: true,
     });

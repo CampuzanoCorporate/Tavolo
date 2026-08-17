@@ -30,9 +30,13 @@ export declare const ESCPOS: {
 };
 export interface PrinterTarget {
     /** Dirección IP de la impresora en la red local */
-    ipAddress: string;
+    ipAddress?: string;
     /** Puerto TCP (default: 9100 para ESC/POS) */
     port?: number;
+    /** Nombre de la impresora dada de alta en el sistema operativo */
+    systemName?: string;
+    /** Modo de conexión */
+    connectionType?: 'NETWORK' | 'SYSTEM';
     /** Timeout de conexión en ms (default: 5000) */
     timeoutMs?: number;
 }
@@ -94,6 +98,7 @@ export interface KitchenMessageData {
  * @throws Error si no se puede conectar a la impresora
  */
 export declare function sendToPrinter(target: PrinterTarget, data: Buffer): Promise<void>;
+export declare function listSystemPrinters(): Promise<string[]>;
 /**
  * Construye el buffer ESC/POS de un ticket/factura completo.
  *

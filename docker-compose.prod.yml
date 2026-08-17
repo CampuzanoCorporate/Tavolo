@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tavolo_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: tavolo_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?schema=public
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+      CERT_ENCRYPTION_SECRET: ${CERT_ENCRYPTION_SECRET}
+      AEAT_ENDPOINT_URL: ${AEAT_ENDPOINT_URL}
+      BUSINESS_NAME: ${BUSINESS_NAME}
+      BUSINESS_NIF: ${BUSINESS_NIF}
+      BUSINESS_ADDRESS: ${BUSINESS_ADDRESS}
+      INVOICE_SERIES: ${INVOICE_SERIES}
+      LICENSE_MASTER_KEY: ${LICENSE_MASTER_KEY}
+      LICENSE_VALIDITY_DAYS: ${LICENSE_VALIDITY_DAYS}
+      LICENSE_GRACE_DAYS: ${LICENSE_GRACE_DAYS}
+    command: sh -c "npm run db:deploy -w packages/backend && node packages/backend/dist/server.js"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: tavolo_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '80:80'
+
+volumes:
+  postgres_data:
+    driver: local

@@ -199,6 +199,8 @@ export const printersApi = {
     apiClient.post('/api/printers/open-drawer', { venueId }).then((r) => r.data),
   getPreviewSamples: (venueId: number) =>
     apiClient.get('/api/printers/preview-samples', { params: { venueId } }).then((r) => r.data.data),
+  getSystemPrinters: () =>
+    apiClient.get<{ data: string[] }>('/api/printers/system').then((r) => r.data.data),
 };
 
 export const licensingApi = {

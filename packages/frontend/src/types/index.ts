@@ -10,6 +10,7 @@ export type Role = 'ADMIN' | 'MANAGER' | 'WAITER' | 'KITCHEN';
 export type TableStatus = 'FREE' | 'OCCUPIED' | 'ORDERING' | 'BILL_REQUESTED';
 export type AeatStatus = 'PENDING' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'ERROR';
 export type PrinterType = 'RECEIPT' | 'KITCHEN' | 'BAR';
+export type PrinterConnectionType = 'NETWORK' | 'SYSTEM';
 export type OrderStatus = 'OPEN' | 'SENT_TO_KITCHEN' | 'READY' | 'CLOSED' | 'CANCELLED';
 export type ProductType = 'NORMAL' | 'MENU';
 export type MenuCourseTag = 'FIRST' | 'SECOND' | 'DESSERT' | 'COFFEE';
@@ -420,8 +421,10 @@ export interface Printer {
   id: number;
   venueId: number;
   name: string;
-  ipAddress: string;
-  port: number;
+  connectionType: PrinterConnectionType;
+  ipAddress?: string | null;
+  port?: number | null;
+  systemName?: string | null;
   type: PrinterType;
   isActive: boolean;
 }

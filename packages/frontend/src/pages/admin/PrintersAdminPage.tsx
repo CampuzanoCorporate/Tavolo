@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { adminApi, printersApi } from '../../services/api';
-import type { Printer, ProductionStation, Venue } from '../../types';
+import type { Printer, PrinterConnectionType, ProductionStation, Venue } from '../../types';
 
 export function PrintersAdminPage() {
   const { id: venueIdStr } = useParams<{ id: string }>();
@@ -23,12 +23,15 @@ export function PrintersAdminPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewSamples, setPreviewSamples] = useState<{ ticket: string; kitchen: string } | null>(null);
   const [previewTab, setPreviewTab] = useState<'ticket' | 'kitchen'>('ticket');
+  const [systemPrinters, setSystemPrinters] = useState<string[]>([]);
 
   // Form State
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
   const [name, setName] = useState('');
+  const [connectionType, setConnectionType] = useState<PrinterConnectionType>('NETWORK');
   const [ipAddress, setIpAddress] = useState('');
   const [port, setPort] = useState<number>(9100);
+  const [systemName, setSystemName] = useState('');
   const [type, setType] = useState<'RECEIPT' | 'KITCHEN' | 'BAR'>('RECEIPT');
   const [isActive, setIsActive] = useState(true);
 
@@ -49,6 +52,11 @@ export function PrintersAdminPage() {
       ]);
       setPrinters(p);
       setStations(s);
+      try {
+        setSystemPrinters(await printersApi.getSystemPrinters());
+      } catch {
+        setSystemPrinters([]);
+      }
     } catch {
       toast.error('Error cargando impresoras');
     } finally {
@@ -63,8 +71,10 @@ export function PrintersAdminPage() {
   const openNewPrinterModal = () => {
     setSelectedPrinterId(null);
     setName('');
+    setConnectionType('NETWORK');
     setIpAddress('192.168.1.');
     setPort(9100);
+    setSystemName('');
     setType('RECEIPT');
     setIsActive(true);
     setModalOpen(true);
@@ -83,8 +93,10 @@ export function PrintersAdminPage() {
   const openEditPrinterModal = (p: Printer) => {
     setSelectedPrinterId(p.id);
     setName(p.name);
-    setIpAddress(p.ipAddress);
-    setPort(p.port);
+    setConnectionType(p.connectionType);
+    setIpAddress(p.ipAddress ?? '');
+    setPort(p.port ?? 9100);
+    setSystemName(p.systemName ?? '');
     setType(p.type as 'RECEIPT' | 'KITCHEN' | 'BAR');
     setIsActive(p.isActive);
     setModalOpen(true);
@@ -126,10 +138,22 @@ export function PrintersAdminPage() {
     e.preventDefault();
     setSaving(true);
     try {
+      if (connectionType === 'NETWORK' && !ipAddress.trim()) {
+        toast.error('Indica la IP de la impresora');
+        return;
+      }
+
+      if (connectionType === 'SYSTEM' && !systemName.trim()) {
+        toast.error('Selecciona una impresora del sistema');
+        return;
+      }
+
       const payload = {
         name,
-        ipAddress,
-        port,
+        connectionType,
+        ipAddress: connectionType === 'NETWORK' ? ipAddress : null,
+        port: connectionType === 'NETWORK' ? port : null,
+        systemName: connectionType === 'SYSTEM' ? systemName : null,
         type,
         isActive,
       };
@@ -201,7 +225,7 @@ export function PrintersAdminPage() {
       <div className="admin-page-header">
         <div>
           <h1 className="admin-page-title">Impresoras — {venue?.name}</h1>
-          <p className="admin-page-subtitle">Configura las impresoras térmicas ESC/POS (TCP/IP) del local</p>
+          <p className="admin-page-subtitle">Configura impresoras directas por red o impresoras ya dadas de alta en el sistema operativo del servidor</p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button className="btn btn-secondary" onClick={() => openPreview('kitchen')} disabled={previewLoading}>
@@ -229,8 +253,8 @@ export function PrintersAdminPage() {
               <tr>
                 <th>Nombre</th>
                 <th>Tipo / Uso</th>
-                <th>Dirección TCP/IP</th>
-                <th>Puerto</th>
+                <th>Conexión</th>
+                <th>Destino</th>
                 <th>Estado</th>
                 <th style={{ textAlign: 'right' }}>Acciones</th>
               </tr>
@@ -255,9 +279,17 @@ export function PrintersAdminPage() {
                       </span>
                     </td>
                     <td>
-                      <code className="admin-code">{p.ipAddress}</code>
+                      <span className={`admin-badge ${p.connectionType === 'NETWORK' ? 'admin-badge--info' : 'admin-badge--muted'}`}>
+                        {p.connectionType === 'NETWORK' ? 'TCP/IP' : 'SISTEMA'}
+                      </span>
                     </td>
-                    <td>{p.port}</td>
+                    <td>
+                      <code className="admin-code">
+                        {p.connectionType === 'NETWORK'
+                          ? `${p.ipAddress ?? '-'}:${p.port ?? '-'}`
+                          : (p.systemName ?? 'Sin nombre')}
+                      </code>
+                    </td>
                     <td>
                       <span className={`admin-badge ${p.isActive ? 'admin-badge--success' : 'admin-badge--muted'}`}>
                         {p.isActive ? 'Activa' : 'Inactiva'}
@@ -364,33 +396,69 @@ export function PrintersAdminPage() {
                 />
               </div>
 
-              <div className="form-row-2">
-                <div className="form-group">
-                  <label className="form-label" htmlFor="printer-ip">IP Address *</label>
-                  <input
-                    id="printer-ip"
-                    className="form-input"
-                    value={ipAddress}
-                    onChange={(e) => setIpAddress(e.target.value)}
-                    required
-                    placeholder="192.168.1.100"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" htmlFor="printer-port">Puerto TCP *</label>
-                  <input
-                    id="printer-port"
-                    type="number"
-                    className="form-input"
-                    value={port}
-                    onChange={(e) => setPort(parseInt(e.target.value, 10))}
-                    required
-                    min={1}
-                    max={65535}
-                  />
-                </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="printer-connection-type">Modo de conexión *</label>
+                <select
+                  id="printer-connection-type"
+                  className="form-select"
+                  value={connectionType}
+                  onChange={(e) => setConnectionType(e.target.value as PrinterConnectionType)}
+                >
+                  <option value="NETWORK">TCP/IP directa</option>
+                  <option value="SYSTEM">Impresora del sistema</option>
+                </select>
               </div>
+
+              {connectionType === 'NETWORK' ? (
+                <div className="form-row-2">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="printer-ip">IP Address *</label>
+                    <input
+                      id="printer-ip"
+                      className="form-input"
+                      value={ipAddress}
+                      onChange={(e) => setIpAddress(e.target.value)}
+                      required
+                      placeholder="192.168.1.100"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="printer-port">Puerto TCP *</label>
+                    <input
+                      id="printer-port"
+                      type="number"
+                      className="form-input"
+                      value={port}
+                      onChange={(e) => setPort(parseInt(e.target.value, 10))}
+                      required
+                      min={1}
+                      max={65535}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label className="form-label" htmlFor="printer-system-name">Impresora del sistema *</label>
+                  <select
+                    id="printer-system-name"
+                    className="form-select"
+                    value={systemName}
+                    onChange={(e) => setSystemName(e.target.value)}
+                    required
+                  >
+                    <option value="">Selecciona una impresora</option>
+                    {systemPrinters.map((printerName) => (
+                      <option key={printerName} value={printerName}>
+                        {printerName}
+                      </option>
+                    ))}
+                  </select>
+                  <small style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                    Esta lista sale del sistema operativo donde corre Tavolo. Si el backend está en Proxmox, la impresora debe estar configurada dentro de esa VM o contenedor.
+                  </small>
+                </div>
+              )}
 
               <div className="form-row-2">
                 <div className="form-group">

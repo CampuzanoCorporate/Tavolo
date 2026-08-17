@@ -25,10 +25,23 @@ export declare const config: {
     };
     /**
      * Configuración del módulo Veri*factu / AEAT.
-     * En producción, descomentar y configurar la ruta al certificado FNMT.
+     * La remisión VERI*FACTU usa el certificado cargado desde administración.
      */
     readonly aeat: {
+        readonly deliveryMode: string;
         readonly endpointUrl: string;
+        readonly timeoutMs: number;
+        readonly software: {
+            readonly developerName: string;
+            readonly developerNif: string;
+            readonly softwareName: string;
+            readonly softwareId: string;
+            readonly softwareVersion: string;
+            readonly installationId: string;
+            readonly onlyVerifactu: string;
+            readonly multiObligado: string;
+            readonly multipleObligadoIndicator: string;
+        };
     };
     readonly certificates: {
         readonly encryptionSecret: string;

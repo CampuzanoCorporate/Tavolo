@@ -16,10 +16,16 @@
  * ============================================================
  */
 import net from 'net';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 // `pngjs` ya existe en el árbol de dependencias y nos permite rasterizar
 // el logo a ESC/POS sin dependencias nativas.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { PNG } = require('pngjs');
+const execFileAsync = promisify(execFile);
 
 // ─── CONSTANTES ESC/POS ────────────────────────────────────────────────────
 
@@ -69,9 +75,13 @@ export const ESCPOS = {
 
 export interface PrinterTarget {
   /** Dirección IP de la impresora en la red local */
-  ipAddress: string;
+  ipAddress?: string;
   /** Puerto TCP (default: 9100 para ESC/POS) */
   port?: number;
+  /** Nombre de la impresora dada de alta en el sistema operativo */
+  systemName?: string;
+  /** Modo de conexión */
+  connectionType?: 'NETWORK' | 'SYSTEM';
   /** Timeout de conexión en ms (default: 5000) */
   timeoutMs?: number;
 }
@@ -142,7 +152,14 @@ export function sendToPrinter(
   target: PrinterTarget,
   data: Buffer
 ): Promise<void> {
+  if (target.connectionType === 'SYSTEM') {
+    return sendToSystemPrinter(target, data);
+  }
+
   const { ipAddress, port = 9100, timeoutMs = 5000 } = target;
+  if (!ipAddress) {
+    return Promise.reject(new Error('Falta la IP de la impresora de red'));
+  }
 
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
@@ -174,6 +191,42 @@ export function sendToPrinter(
       reject(new Error(`Error de red con impresora ${ipAddress}:${port} — ${err.message}`));
     });
   });
+}
+
+async function sendToSystemPrinter(target: PrinterTarget, data: Buffer): Promise<void> {
+  if (!target.systemName) {
+    throw new Error('Falta el nombre de la impresora del sistema');
+  }
+
+  const tmpFile = path.join(os.tmpdir(), `tavolo-print-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+
+  try {
+    await fs.writeFile(tmpFile, data);
+    const command = process.platform === 'darwin' ? 'lp' : 'lp';
+    const args = process.platform === 'darwin'
+      ? ['-d', target.systemName, '-o', 'raw', tmpFile]
+      : ['-d', target.systemName, '-o', 'raw', tmpFile];
+
+    await execFileAsync(command, args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error desconocido al imprimir por sistema';
+    throw new Error(`Error enviando a impresora del sistema "${target.systemName}": ${message}`);
+  } finally {
+    await fs.unlink(tmpFile).catch(() => undefined);
+  }
+}
+
+export async function listSystemPrinters(): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync('lpstat', ['-a']);
+    return stdout
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((value) => value && value !== 'lpstat:');
+  } catch (error) {
+    console.warn('[Printer] No se pudieron listar impresoras del sistema', error);
+    return [];
+  }
 }
 
 // ─── CONSTRUCTORES DE TICKETS ──────────────────────────────────────────────

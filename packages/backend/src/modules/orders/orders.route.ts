@@ -139,7 +139,7 @@ async function printProductionEntries(params: {
 
   const stationMap = new Map<number, (typeof stations)[number]>(stations.map((station) => [station.id, station]));
   const printableGroups = new Map<string, {
-    printer: { name: string; ipAddress: string; port: number };
+    printer: { name: string; connectionType: 'NETWORK' | 'SYSTEM'; ipAddress: string | null; port: number | null; systemName: string | null };
     entries: ProductionPrintEntry[];
   }>();
 
@@ -177,7 +177,12 @@ async function printProductionEntries(params: {
           notes: entry.notes,
         })),
       });
-      await sendToPrinter({ ipAddress: printer.ipAddress, port: printer.port }, buf);
+      await sendToPrinter({
+        connectionType: printer.connectionType,
+        ipAddress: printer.ipAddress ?? undefined,
+        port: printer.port ?? undefined,
+        systemName: printer.systemName ?? undefined,
+      }, buf);
     }),
   );
 }
@@ -559,7 +564,12 @@ export async function ordersRoutes(fastify: FastifyInstance) {
       try {
         await Promise.all(
           kitchenPrinters.map((printer) =>
-            sendToPrinter({ ipAddress: printer.ipAddress, port: printer.port }, buf)
+            sendToPrinter({
+              connectionType: printer.connectionType,
+              ipAddress: printer.ipAddress ?? undefined,
+              port: printer.port ?? undefined,
+              systemName: printer.systemName ?? undefined,
+            }, buf)
           )
         );
       } catch (e) {
