@@ -27,6 +27,8 @@ export declare const ESCPOS: {
     readonly CUT_FULL: Buffer<ArrayBuffer>;
     /** Abrir cajón portamonedas (pin 2) */
     readonly OPEN_DRAWER: Buffer<ArrayBuffer>;
+    /** Selecciona Windows-1252, válida para tildes y caracteres occidentales */
+    readonly CODEPAGE_WCP1252: Buffer<ArrayBuffer>;
 };
 export interface PrinterTarget {
     /** Dirección IP de la impresora en la red local */

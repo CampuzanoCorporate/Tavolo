@@ -69,6 +69,9 @@ export const ESCPOS = {
 
   /** Abrir cajón portamonedas (pin 2) */
   OPEN_DRAWER: Buffer.from([ESC, 0x70, 0x00, 0x19, 0xfa]),
+
+  /** Selecciona Windows-1252, válida para tildes y caracteres occidentales */
+  CODEPAGE_WCP1252: Buffer.from([ESC, 0x74, 0x10]),
 } as const;
 
 // ─── INTERFACES ────────────────────────────────────────────────────────────
@@ -240,12 +243,22 @@ export async function listSystemPrinters(): Promise<string[]> {
 export function buildTicketBuffer(data: PrintTicketData): Buffer {
   const parts: Buffer[] = [];
 
-  const text = (str: string) => Buffer.from(str, 'latin1');
+  const normalizeText = (value: string) => value
+    .normalize('NFC')
+    .replaceAll('€', 'EUR')
+    .replaceAll('’', "'")
+    .replaceAll('‘', "'")
+    .replaceAll('“', '"')
+    .replaceAll('”', '"')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-');
+  const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 42) => text(char.repeat(length));
 
   // ── Inicializar impresora
   parts.push(ESCPOS.INIT);
+  parts.push(ESCPOS.CODEPAGE_WCP1252);
 
   if (data.logoPngBase64) {
     const logoBuffer = buildEscPosImageBuffer(data.logoPngBase64);
@@ -312,6 +325,18 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   parts.push(text('Factura verificable en sede.agenciatributaria.gob.es'), nl);
   parts.push(text('Veri*factu RD 1007/2023'), nl);
   parts.push(nl);
+
+  if (data.qrBase64) {
+    const qrBuffer = buildEscPosImageBuffer(data.qrBase64);
+    if (qrBuffer) {
+      parts.push(ESCPOS.ALIGN_CENTER);
+      parts.push(qrBuffer);
+      parts.push(nl);
+      parts.push(text(`QR: ${data.invoiceCode}`), nl);
+      parts.push(nl);
+    }
+  }
+
   parts.push(text('Gracias por su visita'), nl);
   parts.push(nl, nl, nl);
 
@@ -353,6 +378,9 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
   lines.push(`IVA (${data.vatRate}%): ${data.vatAmount.toFixed(2)} EUR`);
   lines.push(`TOTAL: ${data.total.toFixed(2)} EUR`);
   lines.push('==========================================');
+  if (data.qrBase64) {
+    lines.push('[QR Veri*factu]');
+  }
   lines.push('Gracias por su visita');
 
   return lines.join('\n');
@@ -407,7 +435,15 @@ function buildEscPosImageBuffer(base64Png: string): Buffer | null {
  */
 export function buildCommandaBuffer(data: PrintCommandaData): Buffer {
   const parts: Buffer[] = [];
-  const text = (str: string) => Buffer.from(str, 'latin1');
+  const normalizeText = (value: string) => value
+    .normalize('NFC')
+    .replaceAll('’', "'")
+    .replaceAll('‘', "'")
+    .replaceAll('“', '"')
+    .replaceAll('”', '"')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-');
+  const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 32) => text(char.repeat(length));
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -433,6 +469,7 @@ export function buildCommandaBuffer(data: PrintCommandaData): Buffer {
   };
 
   parts.push(ESCPOS.INIT);
+  parts.push(ESCPOS.CODEPAGE_WCP1252);
   parts.push(ESCPOS.ALIGN_CENTER);
   parts.push(ESCPOS.BOLD_ON, ESCPOS.DOUBLE_SIZE_ON);
   if (data.isCancellation) {
@@ -518,7 +555,15 @@ export function buildCommandaPreviewText(data: PrintCommandaData): string {
 
 export function buildKitchenMessageBuffer(data: KitchenMessageData): Buffer {
   const parts: Buffer[] = [];
-  const text = (str: string) => Buffer.from(str, 'latin1');
+  const normalizeText = (value: string) => value
+    .normalize('NFC')
+    .replaceAll('’', "'")
+    .replaceAll('‘', "'")
+    .replaceAll('“', '"')
+    .replaceAll('”', '"')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-');
+  const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 32) => text(char.repeat(length));
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -526,6 +571,7 @@ export function buildKitchenMessageBuffer(data: KitchenMessageData): Buffer {
   const time = `${pad(createdAt.getHours())}:${pad(createdAt.getMinutes())}`;
 
   parts.push(ESCPOS.INIT);
+  parts.push(ESCPOS.CODEPAGE_WCP1252);
   parts.push(ESCPOS.ALIGN_CENTER);
   parts.push(ESCPOS.BOLD_ON, ESCPOS.DOUBLE_SIZE_ON);
   parts.push(text('AVISO COCINA'), nl);
