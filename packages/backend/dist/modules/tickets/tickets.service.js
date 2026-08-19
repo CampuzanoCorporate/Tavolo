@@ -63,10 +63,10 @@ async function buildStoredTicketQrBase64(params) {
     const fechaStr = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
     return (0, qr_service_1.generateVerifactuQrBase64)({
         nif: params.effectiveNif,
-        nombre: params.effectiveName,
         fecha: fechaStr,
-        num: params.invoiceCode,
+        numserie: params.invoiceCode,
         importe: (0, hash_service_1.formatDecimalForHash)(parseFloat(params.total.toString())),
+        idioma: 'es',
     }, config_1.config.server.isDev ? 'preproduction' : 'production');
 }
 async function closeTicket(input) {
@@ -211,7 +211,13 @@ async function closeTicket(input) {
         const pad = (n) => String(n).padStart(2, '0');
         const d = ticket.issuedAt;
         const fechaStr = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
-        qrBase64 = await (0, qr_service_1.generateVerifactuQrBase64)({ nif: effectiveNif, nombre: effectiveName, fecha: fechaStr, num: ticket.invoiceCode, importe: (0, hash_service_1.formatDecimalForHash)(total) }, config_1.config.server.isDev ? 'preproduction' : 'production');
+        qrBase64 = await (0, qr_service_1.generateVerifactuQrBase64)({
+            nif: effectiveNif,
+            fecha: fechaStr,
+            numserie: ticket.invoiceCode,
+            importe: (0, hash_service_1.formatDecimalForHash)(total),
+            idioma: 'es',
+        }, config_1.config.server.isDev ? 'preproduction' : 'production');
     }
     catch (e) {
         console.warn('[Tickets] Error generando QR:', e);

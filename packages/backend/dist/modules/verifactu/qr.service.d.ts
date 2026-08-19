@@ -1,14 +1,14 @@
 export interface QrVerifyParams {
     /** NIF del emisor */
     nif: string;
-    /** Nombre o razón social del emisor */
-    nombre: string;
     /** Fecha de expedición en formato dd-mm-yyyy */
     fecha: string;
-    /** Número de factura completo (serie + número) */
-    num: string;
+    /** Número de serie + número de factura */
+    numserie: string;
     /** Importe total con 2 decimales */
     importe: string;
+    /** Idioma opcional de la respuesta de la sede */
+    idioma?: 'gl' | 'ca' | 'eu' | 'es' | 'va' | 'en';
 }
 /**
  * Construye la URL de cotejo de Veri*factu para la AEAT.

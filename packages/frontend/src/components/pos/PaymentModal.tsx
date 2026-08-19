@@ -154,7 +154,7 @@ export function PaymentModal({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
               <div>
-                <div style={{ fontWeight: 700 }}>Impresora local de este equipo</div>
+                <div style={{ fontWeight: 700 }}>Impresion local de este equipo</div>
                 <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
                   Usa QZ Tray para imprimir en una impresora instalada en este PC.
                 </div>
@@ -169,22 +169,28 @@ export function PaymentModal({
               </button>
             </div>
 
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="local-printer-select">Impresora local</label>
-              <select
-                id="local-printer-select"
-                className="form-select"
-                value={localPrinting.printerName ?? ''}
-                onChange={(event) => localPrinting.onChange(event.target.value || null)}
-              >
-                <option value="">No usar impresión local</option>
-                {localPrinting.availablePrinters.map((printer) => (
-                  <option key={printer} value={printer}>
-                    {printer}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {localPrinting.availablePrinters.length > 0 ? (
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="local-printer-select">Impresora detectada</label>
+                <select
+                  id="local-printer-select"
+                  className="form-select"
+                  value={localPrinting.printerName ?? ''}
+                  onChange={(event) => localPrinting.onChange(event.target.value || null)}
+                >
+                  <option value="">No usar impresion local</option>
+                  {localPrinting.availablePrinters.map((printer) => (
+                    <option key={printer} value={printer}>
+                      {printer}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+                Pulsa en <strong>Detectar</strong> para buscar impresoras locales en este equipo.
+              </div>
+            )}
 
             {!localPrinting.enabled && (
               <div style={{ marginTop: 'var(--space-2)', fontSize: '0.82rem', color: 'var(--color-warning, #b45309)' }}>

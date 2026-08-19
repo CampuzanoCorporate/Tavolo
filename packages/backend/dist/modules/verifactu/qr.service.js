@@ -19,9 +19,8 @@ exports.generateVerifactuQrBuffer = generateVerifactuQrBuffer;
  * la sede electrónica de la AEAT escaneando el QR del ticket.
  *
  * URL de cotejo (preproducción):
- *   https://prewww2.aeat.es/static_files/common/internet/dep/
- *   aplicaciones/es/aeat/tike/cont/ws/SistemaFacturacion/
- *   VerificacionFactura?nif=X&nombre=Y&fecha=Z&num=A&importe=B
+ *   https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR
+ *   ?nif=X&numserie=Y&fecha=Z&importe=B
  *
  * Referencias:
  *   - Especificación Técnica AEAT Veri*factu (Anexo IV - QR)
@@ -30,8 +29,8 @@ exports.generateVerifactuQrBuffer = generateVerifactuQrBuffer;
 const qrcode_1 = __importDefault(require("qrcode"));
 /** Entorno de la AEAT para el QR de cotejo */
 const AEAT_VERIFY_BASE_URL = {
-    production: 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tike/cont/ws/SistemaFacturacion/VerificacionFactura',
-    preproduction: 'https://prewww2.aeat.es/static_files/common/internet/dep/aplicaciones/es/aeat/tike/cont/ws/SistemaFacturacion/VerificacionFactura',
+    production: 'https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR',
+    preproduction: 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR',
 };
 /**
  * Construye la URL de cotejo de Veri*factu para la AEAT.
@@ -44,11 +43,13 @@ function buildVerifyUrl(params, env = 'preproduction') {
     const baseUrl = AEAT_VERIFY_BASE_URL[env];
     const urlParams = new URLSearchParams({
         nif: params.nif,
-        nombre: params.nombre,
+        numserie: params.numserie,
         fecha: params.fecha,
-        num: params.num,
         importe: params.importe,
     });
+    if (params.idioma) {
+        urlParams.set('idioma', params.idioma);
+    }
     return `${baseUrl}?${urlParams.toString()}`;
 }
 /**

@@ -151,10 +151,10 @@ async function buildStoredTicketQrBase64(params: {
   return generateVerifactuQrBase64(
     {
       nif: params.effectiveNif,
-      nombre: params.effectiveName,
       fecha: fechaStr,
-      num: params.invoiceCode,
+      numserie: params.invoiceCode,
       importe: formatDecimalForHash(parseFloat(params.total.toString())),
+      idioma: 'es',
     },
     config.server.isDev ? 'preproduction' : 'production',
   );
@@ -317,7 +317,13 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
     const d = ticket.issuedAt;
     const fechaStr = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
     qrBase64 = await generateVerifactuQrBase64(
-      { nif: effectiveNif, nombre: effectiveName, fecha: fechaStr, num: ticket.invoiceCode, importe: formatDecimalForHash(total) },
+      {
+        nif: effectiveNif,
+        fecha: fechaStr,
+        numserie: ticket.invoiceCode,
+        importe: formatDecimalForHash(total),
+        idioma: 'es',
+      },
       config.server.isDev ? 'preproduction' : 'production'
     );
   } catch (e) {

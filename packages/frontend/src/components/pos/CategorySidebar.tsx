@@ -1,7 +1,6 @@
 /**
  * TAVOLO POS — Sidebar de Categorías
  */
-import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Category } from '../../types';
 
@@ -12,35 +11,7 @@ interface CategorySidebarProps {
   getCategoryAccent: (category: Category) => string;
 }
 
-const MAX_CATEGORY_SLOTS = 8;
-
 export function CategorySidebar({ categories, selectedId, onSelect, getCategoryAccent }: CategorySidebarProps) {
-  const [page, setPage] = useState(0);
-
-  const sortedCategories = [...categories].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
-  const hasPagination = sortedCategories.length > MAX_CATEGORY_SLOTS;
-  const categoriesPerPage = hasPagination ? MAX_CATEGORY_SLOTS - 1 : MAX_CATEGORY_SLOTS;
-  const totalPages = Math.max(1, Math.ceil(sortedCategories.length / categoriesPerPage));
-  const currentPage = Math.min(page, totalPages - 1);
-  const visibleCategories = sortedCategories.slice(
-    currentPage * categoriesPerPage,
-    currentPage * categoriesPerPage + categoriesPerPage,
-  );
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, totalPages - 1));
-  }, [totalPages]);
-
-  useEffect(() => {
-    if (selectedId === null) return;
-    const selectedIndex = sortedCategories.findIndex((category) => category.id === selectedId);
-    if (selectedIndex === -1) return;
-    const nextPage = Math.floor(selectedIndex / categoriesPerPage);
-    if (nextPage !== currentPage) {
-      setPage(nextPage);
-    }
-  }, [categoriesPerPage, currentPage, selectedId, sortedCategories]);
-
   return (
     <nav className="category-sidebar" aria-label="Categorías de productos">
       <div className="category-sidebar__header">
@@ -49,7 +20,7 @@ export function CategorySidebar({ categories, selectedId, onSelect, getCategoryA
         <span className="category-sidebar__meta">{categories.length} familias</span>
       </div>
 
-      {visibleCategories.map((cat) => (
+      {categories.map((cat) => (
         <button
           key={cat.id}
           id={`category-btn-${cat.id}`}
@@ -78,21 +49,6 @@ export function CategorySidebar({ categories, selectedId, onSelect, getCategoryA
           )}
         </button>
       ))}
-
-      {hasPagination && (
-        <button
-          type="button"
-          className="category-btn category-btn--pager"
-          onClick={() => setPage((current) => (current + 1) % totalPages)}
-        >
-          <span className="category-btn__label">
-            Más categorías
-          </span>
-          <span className="category-btn__count">
-            {currentPage + 1}/{totalPages}
-          </span>
-        </button>
-      )}
     </nav>
   );
 }
