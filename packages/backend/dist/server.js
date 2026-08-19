@@ -23,6 +23,7 @@ const admin_route_1 = require("./modules/admin/admin.route");
 const client_1 = require("./db/client");
 const licensing_route_1 = require("./modules/licensing/licensing.route");
 const licensing_service_1 = require("./modules/licensing/licensing.service");
+const qz_route_1 = require("./modules/qz/qz.route");
 async function bootstrap() {
     const app = (0, fastify_1.default)({
         logger: { level: config_1.config.server.isDev ? 'debug' : 'warn' },
@@ -96,6 +97,7 @@ async function bootstrap() {
     await app.register(products_route_1.printersRoutes, { prefix: '/api/printers' });
     await app.register(admin_route_1.adminRoutes, { prefix: '/api/admin' });
     await app.register(licensing_route_1.licensingRoutes, { prefix: '/api/licensing' });
+    await app.register(qz_route_1.qzRoutes, { prefix: '/api/qz' });
     // ── Arrancar servidor ─────────────────────────────────────────────────────
     try {
         await app.listen({ port: config_1.config.server.port, host: '0.0.0.0' });

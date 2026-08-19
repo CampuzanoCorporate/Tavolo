@@ -4,6 +4,8 @@ const QZ_SCRIPT_SOURCES = [
   'https://unpkg.com/qz-tray@2.2.6/qz-tray.js',
 ];
 
+import { apiClient } from './api';
+
 type QzTrayApi = {
   websocket: {
     connect: (options?: unknown) => Promise<void>;
@@ -11,7 +13,12 @@ type QzTrayApi = {
     isActive?: () => boolean;
   };
   api?: {
-    setPromiseType?: (promiseType: PromiseConstructor) => void;
+    setPromiseType?: (promiseFactory: (resolver: (resolve: (value?: unknown) => void, reject: (reason?: unknown) => void) => void) => Promise<unknown>) => void;
+  };
+  security?: {
+    setCertificatePromise?: (handler: (resolve: (value: string) => void, reject: (reason?: unknown) => void) => void) => void;
+    setSignaturePromise?: (handler: (toSign: string) => (resolve: (value: string) => void, reject: (reason?: unknown) => void) => void) => void;
+    setSignatureAlgorithm?: (algorithm: string) => void;
   };
   printers: {
     find: (query?: string) => Promise<string[] | string>;
@@ -29,6 +36,7 @@ declare global {
 }
 
 let qzLoaderPromise: Promise<QzTrayApi> | null = null;
+let qzSecurityPromise: Promise<void> | null = null;
 
 function loadScript(src: string) {
   return new Promise<void>((resolve, reject) => {
@@ -58,7 +66,7 @@ async function loadQzGlobal() {
     try {
       await loadScript(src);
       if (window.qz) {
-        window.qz.api?.setPromiseType?.(Promise);
+        window.qz.api?.setPromiseType?.((resolver) => new Promise(resolver));
         return window.qz;
       }
     } catch {
@@ -69,9 +77,36 @@ async function loadQzGlobal() {
   throw new Error('No se pudo cargar QZ Tray. Instala QZ Tray y copia qz-tray.js en /qz/ o permite la carga del CDN.');
 }
 
+async function configureQzSecurity(qz: QzTrayApi) {
+  if (!qz.security?.setCertificatePromise || !qz.security?.setSignaturePromise) {
+    return;
+  }
+
+  qz.security.setCertificatePromise((resolve, reject) => {
+    apiClient.get<string>('/api/qz/certificate', {
+      responseType: 'text',
+      transformResponse: [(value) => value],
+    })
+      .then((response) => resolve(response.data))
+      .catch((error) => reject(error));
+  });
+
+  qz.security.setSignatureAlgorithm?.('SHA512');
+  qz.security.setSignaturePromise((toSign) => (resolve, reject) => {
+    apiClient.post<{ data: string }>('/api/qz/sign', { request: toSign })
+      .then((response) => resolve(response.data.data))
+      .catch((error) => reject(error));
+  });
+}
+
 export async function getQzTray() {
   qzLoaderPromise ??= loadQzGlobal();
-  return qzLoaderPromise;
+  const qz = await qzLoaderPromise;
+
+  qzSecurityPromise ??= configureQzSecurity(qz);
+  await qzSecurityPromise;
+
+  return qz;
 }
 
 export async function ensureQzTrayConnection() {

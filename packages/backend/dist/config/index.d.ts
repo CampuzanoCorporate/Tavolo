@@ -51,6 +51,12 @@ export declare const config: {
         readonly defaultValidityDays: number;
         readonly defaultGraceDays: number;
     };
+    readonly qzTray: {
+        readonly certificatePath: string;
+        readonly privateKeyPath: string;
+        readonly privateKeyPassphrase: string;
+        readonly signatureAlgorithm: string;
+    };
 };
 export type Config = typeof config;
 //# sourceMappingURL=index.d.ts.map

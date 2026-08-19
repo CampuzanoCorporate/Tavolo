@@ -18,6 +18,7 @@ import { adminRoutes } from './modules/admin/admin.route';
 import { prisma } from './db/client';
 import { licensingRoutes } from './modules/licensing/licensing.route';
 import { getOrganisationLicenseStatus } from './modules/licensing/licensing.service';
+import { qzRoutes } from './modules/qz/qz.route';
 
 async function bootstrap() {
   const app = Fastify({
@@ -103,6 +104,7 @@ async function bootstrap() {
   await app.register(printersRoutes, { prefix: '/api/printers' });
   await app.register(adminRoutes,    { prefix: '/api/admin' });
   await app.register(licensingRoutes, { prefix: '/api/licensing' });
+  await app.register(qzRoutes, { prefix: '/api/qz' });
 
   // ── Arrancar servidor ─────────────────────────────────────────────────────
   try {

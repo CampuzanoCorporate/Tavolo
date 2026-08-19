@@ -77,5 +77,11 @@ exports.config = {
         defaultValidityDays: parseInt(optional('LICENSE_VALIDITY_DAYS', '30'), 10),
         defaultGraceDays: parseInt(optional('LICENSE_GRACE_DAYS', '7'), 10),
     },
+    qzTray: {
+        certificatePath: optional('QZ_TRAY_CERTIFICATE_PATH', ''),
+        privateKeyPath: optional('QZ_TRAY_PRIVATE_KEY_PATH', ''),
+        privateKeyPassphrase: optional('QZ_TRAY_PRIVATE_KEY_PASSPHRASE', ''),
+        signatureAlgorithm: optional('QZ_TRAY_SIGNATURE_ALGORITHM', 'SHA512'),
+    },
 };
 //# sourceMappingURL=index.js.map
