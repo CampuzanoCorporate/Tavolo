@@ -312,10 +312,10 @@ export function POSPage() {
   }, [selectedLocalPrinterName, setSelectedLocalPrinterName]);
 
   useEffect(() => {
-    if (selectedLocalPrinterName) {
+    if (isPaymentModalOpen) {
       void loadLocalPrinters();
     }
-  }, [selectedLocalPrinterName, loadLocalPrinters]);
+  }, [isPaymentModalOpen, loadLocalPrinters]);
 
   const handleLocalTicketPrint = useCallback(async (ticketId: number) => {
     if (!selectedLocalPrinterName) return false;
