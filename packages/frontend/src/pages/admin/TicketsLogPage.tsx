@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { adminApi, ticketsApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
+import { printRawBase64WithQzTray } from '../../services/qzTray';
 import type { CashClosure, TicketPreviewData } from '../../types';
 
 interface TicketListItem {
@@ -29,7 +30,7 @@ interface TicketListItem {
 }
 
 export function TicketsLogPage() {
-  const { currentVenueId } = useAppStore();
+  const { currentVenueId, selectedLocalPrinterName } = useAppStore();
   const [tickets, setTickets] = useState<TicketListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -113,8 +114,14 @@ export function TicketsLogPage() {
   const handleReprint = async (ticketId: number) => {
     try {
       setReprintingTicketId(ticketId);
-      await ticketsApi.reprint(ticketId);
-      toast.success('Ticket enviado a impresión');
+      if (selectedLocalPrinterName) {
+        const rawTicket = await ticketsApi.getRaw(ticketId);
+        await printRawBase64WithQzTray(selectedLocalPrinterName, rawTicket.rawBase64);
+        toast.success(`Ticket enviado a la impresora local "${selectedLocalPrinterName}"`);
+      } else {
+        await ticketsApi.reprint(ticketId);
+        toast.success('Ticket enviado a impresión');
+      }
     } catch (error) {
       console.error('[Tickets] Error reimprimiendo ticket:', error);
       toast.error('No se pudo reimprimir el ticket');

@@ -57,6 +57,18 @@ function buildPrintableTicketPayload(ticket, order) {
         qrBase64: ticket.qrBase64 ?? undefined,
     };
 }
+async function buildStoredTicketQrBase64(params) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = params.issuedAt;
+    const fechaStr = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+    return (0, qr_service_1.generateVerifactuQrBase64)({
+        nif: params.effectiveNif,
+        nombre: params.effectiveName,
+        fecha: fechaStr,
+        num: params.invoiceCode,
+        importe: (0, hash_service_1.formatDecimalForHash)(parseFloat(params.total.toString())),
+    }, config_1.config.server.isDev ? 'preproduction' : 'production');
+}
 async function closeTicket(input) {
     const { orderId, userId, venueId, printerIp, printerPort = 9100 } = input;
     // ── 1. Cargar pedido con items ────────────────────────────────────────────
@@ -395,9 +407,20 @@ async function getTicketPreview(ticketId) {
     if (!ticket) {
         throw new Error('Ticket no encontrado');
     }
+    const qrBase64 = await buildStoredTicketQrBase64({
+        effectiveNif: ticket.businessNif,
+        effectiveName: ticket.businessName,
+        issuedAt: ticket.issuedAt,
+        invoiceCode: ticket.invoiceCode,
+        total: ticket.total,
+    }).catch((error) => {
+        console.warn('[Tickets] Error regenerando QR para preview:', error);
+        return undefined;
+    });
     const payload = buildPrintableTicketPayload({
         ...ticket,
         logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.order.user.organisationId),
+        qrBase64,
     }, ticket.order);
     return {
         ticket,
@@ -421,9 +444,20 @@ async function getTicketRaw(ticketId) {
     if (!ticket) {
         throw new Error('Ticket no encontrado');
     }
+    const qrBase64 = await buildStoredTicketQrBase64({
+        effectiveNif: ticket.businessNif,
+        effectiveName: ticket.businessName,
+        issuedAt: ticket.issuedAt,
+        invoiceCode: ticket.invoiceCode,
+        total: ticket.total,
+    }).catch((error) => {
+        console.warn('[Tickets] Error regenerando QR para impresión RAW:', error);
+        return undefined;
+    });
     const payload = buildPrintableTicketPayload({
         ...ticket,
         logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.venue.organisationId),
+        qrBase64,
     }, ticket.order);
     const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
     return {
@@ -466,9 +500,20 @@ async function reprintTicket(ticketId) {
     if (!printer) {
         throw new Error('No hay impresora de tickets activa en esta sede');
     }
+    const qrBase64 = await buildStoredTicketQrBase64({
+        effectiveNif: ticket.businessNif,
+        effectiveName: ticket.businessName,
+        issuedAt: ticket.issuedAt,
+        invoiceCode: ticket.invoiceCode,
+        total: ticket.total,
+    }).catch((error) => {
+        console.warn('[Tickets] Error regenerando QR para reimpresión:', error);
+        return undefined;
+    });
     const payload = buildPrintableTicketPayload({
         ...ticket,
         logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.venue.organisationId),
+        qrBase64,
     }, ticket.order);
     const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
     await (0, printer_service_1.sendToPrinter)({
