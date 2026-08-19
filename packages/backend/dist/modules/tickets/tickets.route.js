@@ -126,6 +126,11 @@ async function ticketsRoutes(fastify) {
         const data = await (0, tickets_service_1.getTicketPreview)(parseInt(request.params.id, 10));
         return reply.send({ data });
     });
+    /** GET /api/tickets/:id/raw */
+    fastify.get('/:id/raw', async (request, reply) => {
+        const data = await (0, tickets_service_1.getTicketRaw)(parseInt(request.params.id, 10));
+        return reply.send({ data });
+    });
     /** POST /api/tickets/:id/reprint */
     fastify.post('/:id/reprint', async (request, reply) => {
         if (!(0, guards_1.requirePermission)(request, reply, 'REPRINT_TICKETS'))

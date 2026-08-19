@@ -535,6 +535,44 @@ export async function getTicketPreview(ticketId: number) {
   };
 }
 
+export async function getTicketRaw(ticketId: number) {
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: {
+      order: {
+        include: {
+          items: { include: { product: true } },
+          table: true,
+          user: true,
+        },
+      },
+      venue: true,
+    },
+  });
+
+  if (!ticket) {
+    throw new Error('Ticket no encontrado');
+  }
+
+  const payload = buildPrintableTicketPayload({
+    ...ticket,
+    logoPngBase64: await getTicketLogoBase64(ticket.venue.organisationId),
+  }, ticket.order);
+  const buffer = buildTicketBuffer(payload);
+
+  return {
+    ticket: {
+      id: ticket.id,
+      invoiceCode: ticket.invoiceCode,
+      issuedAt: ticket.issuedAt.toISOString(),
+      total: ticket.total,
+      businessName: ticket.businessName,
+    },
+    rawBase64: buffer.toString('base64'),
+    preview: buildTicketPreviewText(payload),
+  };
+}
+
 export async function reprintTicket(ticketId: number) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },

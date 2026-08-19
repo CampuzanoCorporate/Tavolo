@@ -184,6 +184,17 @@ export declare function getTicketPreview(ticketId: number): Promise<{
     };
     preview: string;
 }>;
+export declare function getTicketRaw(ticketId: number): Promise<{
+    ticket: {
+        id: number;
+        invoiceCode: string;
+        issuedAt: string;
+        total: Prisma.Decimal;
+        businessName: string;
+    };
+    rawBase64: string;
+    preview: string;
+}>;
 export declare function reprintTicket(ticketId: number): Promise<{
     success: boolean;
 }>;

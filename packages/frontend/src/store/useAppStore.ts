@@ -33,6 +33,7 @@ interface AppState {
   cartItems: CartItem[];
   activeOrder: Order | null;
   selectedPrinterIp: string | null;
+  selectedLocalPrinterName: string | null;
 
   // ── Acciones Auth ─────────────────────────────────────────────────────────
   login: (token: string, user: AuthUser, venueIds: number[]) => void;
@@ -55,6 +56,7 @@ interface AppState {
   setSelectedCategoryId: (id: number | null) => void;
   setActiveOrder: (order: Order | null) => void;
   setSelectedPrinterIp: (ip: string | null) => void;
+  setSelectedLocalPrinterName: (name: string | null) => void;
 
   // ── Carrito ───────────────────────────────────────────────────────────────
   addToCart: (item: Omit<CartItem, 'cartKey' | 'quantity'> & { quantity?: number; mergeKey?: string }) => void;
@@ -84,6 +86,7 @@ export const useAppStore = create<AppState>()(
       cartItems: [],
       activeOrder: null,
       selectedPrinterIp: null,
+      selectedLocalPrinterName: null,
 
       // ── Auth ────────────────────────────────────────────────────────────
       login: (token, user, venueIds) => {
@@ -140,6 +143,7 @@ export const useAppStore = create<AppState>()(
       setSelectedCategoryId: (selectedCategoryId) => set({ selectedCategoryId }),
       setActiveOrder:        (activeOrder) => set({ activeOrder }),
       setSelectedPrinterIp:  (selectedPrinterIp) => set({ selectedPrinterIp }),
+      setSelectedLocalPrinterName: (selectedLocalPrinterName) => set({ selectedLocalPrinterName }),
 
       // ── Carrito ─────────────────────────────────────────────────────────
       addToCart: (newItem) => {
@@ -202,6 +206,7 @@ export const useAppStore = create<AppState>()(
         currentVenue:      state.currentVenue,
         cartItems:         state.cartItems,
         selectedPrinterIp: state.selectedPrinterIp,
+        selectedLocalPrinterName: state.selectedLocalPrinterName,
       }),
     }
   )

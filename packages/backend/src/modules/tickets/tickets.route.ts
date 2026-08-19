@@ -4,7 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { addCashMovement, closeCashRegister, closeTicket, getCashSummary, getTicketPreview, openCashSession, reprintTicket, closePartialTicket } from './tickets.service';
+import { addCashMovement, closeCashRegister, closeTicket, getCashSummary, getTicketPreview, getTicketRaw, openCashSession, reprintTicket, closePartialTicket } from './tickets.service';
 import { canAccessVenue, requirePermission } from '../auth/guards';
 
 const CloseTicketSchema = z.object({
@@ -133,6 +133,12 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
   /** GET /api/tickets/:id/preview */
   fastify.get<{ Params: { id: string } }>('/:id/preview', async (request, reply) => {
     const data = await getTicketPreview(parseInt(request.params.id, 10));
+    return reply.send({ data });
+  });
+
+  /** GET /api/tickets/:id/raw */
+  fastify.get<{ Params: { id: string } }>('/:id/raw', async (request, reply) => {
+    const data = await getTicketRaw(parseInt(request.params.id, 10));
     return reply.send({ data });
   });
 

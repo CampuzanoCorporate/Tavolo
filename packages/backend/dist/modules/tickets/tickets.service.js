@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.closeTicket = closeTicket;
 exports.closePartialTicket = closePartialTicket;
 exports.getTicketPreview = getTicketPreview;
+exports.getTicketRaw = getTicketRaw;
 exports.reprintTicket = reprintTicket;
 exports.getCashSummary = getCashSummary;
 exports.openCashSession = openCashSession;
@@ -400,6 +401,40 @@ async function getTicketPreview(ticketId) {
     }, ticket.order);
     return {
         ticket,
+        preview: (0, printer_service_1.buildTicketPreviewText)(payload),
+    };
+}
+async function getTicketRaw(ticketId) {
+    const ticket = await client_2.prisma.ticket.findUnique({
+        where: { id: ticketId },
+        include: {
+            order: {
+                include: {
+                    items: { include: { product: true } },
+                    table: true,
+                    user: true,
+                },
+            },
+            venue: true,
+        },
+    });
+    if (!ticket) {
+        throw new Error('Ticket no encontrado');
+    }
+    const payload = buildPrintableTicketPayload({
+        ...ticket,
+        logoPngBase64: await (0, logo_service_1.getTicketLogoBase64)(ticket.venue.organisationId),
+    }, ticket.order);
+    const buffer = (0, printer_service_1.buildTicketBuffer)(payload);
+    return {
+        ticket: {
+            id: ticket.id,
+            invoiceCode: ticket.invoiceCode,
+            issuedAt: ticket.issuedAt.toISOString(),
+            total: ticket.total,
+            businessName: ticket.businessName,
+        },
+        rawBase64: buffer.toString('base64'),
         preview: (0, printer_service_1.buildTicketPreviewText)(payload),
     };
 }

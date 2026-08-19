@@ -11,6 +11,7 @@ export type TableStatus = 'FREE' | 'OCCUPIED' | 'ORDERING' | 'BILL_REQUESTED';
 export type AeatStatus = 'PENDING' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'ERROR';
 export type PrinterType = 'RECEIPT' | 'KITCHEN' | 'BAR';
 export type PrinterConnectionType = 'NETWORK' | 'SYSTEM';
+export type LocalPrinterMode = 'NONE' | 'QZ_TRAY';
 export type OrderStatus = 'OPEN' | 'SENT_TO_KITCHEN' | 'READY' | 'CLOSED' | 'CANCELLED';
 export type ProductType = 'NORMAL' | 'MENU';
 export type MenuCourseTag = 'FIRST' | 'SECOND' | 'DESSERT' | 'COFFEE';
@@ -344,6 +345,18 @@ export interface TicketPreviewData {
     businessAddress: string;
     qrBase64?: string | null;
   };
+  preview: string;
+}
+
+export interface TicketRawData {
+  ticket: {
+    id: number;
+    invoiceCode: string;
+    issuedAt: string;
+    total: number | string;
+    businessName: string;
+  };
+  rawBase64: string;
   preview: string;
 }
 

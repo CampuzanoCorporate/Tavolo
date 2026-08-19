@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, TicketRawData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
@@ -108,6 +108,8 @@ export const ticketsApi = {
       ('/api/tickets/close-partial', data).then((r) => r.data.data),
   getPreview: (ticketId: number) =>
     apiClient.get<{ data: TicketPreviewData }>(`/api/tickets/${ticketId}/preview`).then((r) => r.data.data),
+  getRaw: (ticketId: number) =>
+    apiClient.get<{ data: TicketRawData }>(`/api/tickets/${ticketId}/raw`).then((r) => r.data.data),
   reprint: (ticketId: number) =>
     apiClient.post(`/api/tickets/${ticketId}/reprint`).then((r) => r.data.data),
   getCashSummary: (venueId: number) =>

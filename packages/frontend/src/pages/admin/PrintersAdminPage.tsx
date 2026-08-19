@@ -225,7 +225,7 @@ export function PrintersAdminPage() {
       <div className="admin-page-header">
         <div>
           <h1 className="admin-page-title">Impresoras — {venue?.name}</h1>
-          <p className="admin-page-subtitle">Configura impresoras directas por red o impresoras ya dadas de alta en el sistema operativo del servidor</p>
+          <p className="admin-page-subtitle">Configura impresoras directas por red o impresoras del sistema operativo del servidor. Las impresoras locales del puesto cliente se configuran desde la pantalla de cobro con QZ Tray.</p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button className="btn btn-secondary" onClick={() => openPreview('kitchen')} disabled={previewLoading}>

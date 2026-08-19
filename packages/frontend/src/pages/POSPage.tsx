@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import { useAppStore, useCartSummary } from '../store/useAppStore';
 import { productsApi, ordersApi, ticketsApi, tablesApi, apiClient, printersApi } from '../services/api';
 import { cacheCategories, getCachedCategories, saveOrderOffline } from '../services/offlineStorage';
+import { ensureQzTrayConnection, listQzTrayPrinters, printRawBase64WithQzTray } from '../services/qzTray';
 import { CategorySidebar } from '../components/pos/CategorySidebar';
 import { ProductGrid } from '../components/pos/ProductGrid';
 import { Cart } from '../components/pos/Cart';
@@ -86,6 +87,8 @@ export function POSPage() {
     currentUser,
     isOnline,
     selectedPrinterIp,
+    selectedLocalPrinterName,
+    setSelectedLocalPrinterName,
     currentVenueId,
   } = useAppStore();
 
@@ -134,6 +137,9 @@ export function POSPage() {
   const [isSendingKitchenNote, setIsSendingKitchenNote] = useState(false);
   const [isOpenTablesModalOpen, setIsOpenTablesModalOpen] = useState(false);
   const [favoriteCategory, setFavoriteCategory] = useState<Category | null>(null);
+  const [availableLocalPrinters, setAvailableLocalPrinters] = useState<string[]>([]);
+  const [isQzTrayReady, setIsQzTrayReady] = useState(false);
+  const [isLoadingLocalPrinters, setIsLoadingLocalPrinters] = useState(false);
 
   // Vista activa en móvil/tablet pequeña: 'catalog' o 'ticket'
   const [mobileView, setMobileView] = useState<'catalog' | 'ticket'>('catalog');
@@ -280,6 +286,44 @@ export function POSPage() {
   useEffect(() => {
     refreshFavoriteCategory();
   }, [refreshFavoriteCategory]);
+
+  const loadLocalPrinters = useCallback(async () => {
+    try {
+      setIsLoadingLocalPrinters(true);
+      await ensureQzTrayConnection();
+      const printers = await listQzTrayPrinters();
+      setAvailableLocalPrinters(printers);
+      setIsQzTrayReady(true);
+
+      if (selectedLocalPrinterName && !printers.includes(selectedLocalPrinterName)) {
+        setSelectedLocalPrinterName(null);
+      }
+
+      if (!selectedLocalPrinterName && printers.length === 1) {
+        setSelectedLocalPrinterName(printers[0]);
+      }
+    } catch (error) {
+      console.error('[POS] Error cargando impresoras locales:', error);
+      setIsQzTrayReady(false);
+      setAvailableLocalPrinters([]);
+    } finally {
+      setIsLoadingLocalPrinters(false);
+    }
+  }, [selectedLocalPrinterName, setSelectedLocalPrinterName]);
+
+  useEffect(() => {
+    if (selectedLocalPrinterName) {
+      void loadLocalPrinters();
+    }
+  }, [selectedLocalPrinterName, loadLocalPrinters]);
+
+  const handleLocalTicketPrint = useCallback(async (ticketId: number) => {
+    if (!selectedLocalPrinterName) return false;
+
+    const rawTicket = await ticketsApi.getRaw(ticketId);
+    await printRawBase64WithQzTray(selectedLocalPrinterName, rawTicket.rawBase64);
+    return true;
+  }, [selectedLocalPrinterName]);
 
   // ── Añadir producto al carrito ───────────────────────────────────────────
   const addConfiguredProductToCart = async (product: Product, payload?: { price?: number; notes?: string; displayNotes?: string; modifierSummary?: string }) => {
@@ -623,6 +667,8 @@ export function POSPage() {
     setIsClosingTicket(true);
 
     try {
+      const useLocalPrinting = print && !!selectedLocalPrinterName;
+      const useServerPrinting = print && !useLocalPrinting && !!selectedPrinterIp;
       let result;
       if (splitBillSelection) {
         result = await ticketsApi.closePartial({
@@ -636,13 +682,26 @@ export function POSPage() {
             notes: item.notes,
           })),
           splitMode: splitBillMode,
-          printerIp: print ? (selectedPrinterIp || undefined) : undefined,
+          printerIp: useServerPrinting ? (selectedPrinterIp || undefined) : undefined,
         });
       } else {
         result = await ticketsApi.close({
           orderId: activeOrder.id,
           venueId: currentVenueId!,
-          printerIp: print ? (selectedPrinterIp || undefined) : undefined,
+          printerIp: useServerPrinting ? (selectedPrinterIp || undefined) : undefined,
+        });
+      }
+
+      if (useLocalPrinting) {
+        try {
+          await handleLocalTicketPrint(result.ticketId);
+        } catch (printError) {
+          console.error('[POS] Error imprimiendo en QZ Tray:', printError);
+          toast.error('El ticket se ha emitido, pero no se pudo imprimir en la impresora local');
+        }
+      } else if (print && !useServerPrinting) {
+        toast('Ticket emitido sin impresión automática. Configura una impresora local o una impresora de servidor.', {
+          icon: '🖨️',
         });
       }
 
@@ -1039,6 +1098,14 @@ export function POSPage() {
               : undefined
           }
           lastPayment={lastSplitPayment}
+          localPrinting={{
+            enabled: isQzTrayReady,
+            printerName: selectedLocalPrinterName,
+            availablePrinters: availableLocalPrinters,
+            connecting: isLoadingLocalPrinters,
+            onRefresh: () => { void loadLocalPrinters(); },
+            onChange: (printerName) => setSelectedLocalPrinterName(printerName),
+          }}
         />
       )}
     </div>

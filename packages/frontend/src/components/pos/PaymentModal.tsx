@@ -18,6 +18,14 @@ interface PaymentModalProps {
     total: number;
     change?: number;
   } | null;
+  localPrinting?: {
+    enabled: boolean;
+    printerName: string | null;
+    availablePrinters: string[];
+    connecting: boolean;
+    onRefresh: () => void;
+    onChange: (printerName: string | null) => void;
+  };
 }
 
 export function PaymentModal({
@@ -28,6 +36,7 @@ export function PaymentModal({
   onConfirm,
   splitInfo,
   lastPayment,
+  localPrinting,
 }: PaymentModalProps) {
   const [method, setMethod] = useState<'CASH' | 'CARD'>('CARD');
   const [delivered, setDelivered] = useState<string>('');
@@ -128,6 +137,58 @@ export function PaymentModal({
                 color: 'var(--color-success, #10b981)',
               }}>
                 Cambio a devolver: {lastPayment.change.toFixed(2)} €
+              </div>
+            )}
+          </div>
+        )}
+
+        {localPrinting && (
+          <div
+            style={{
+              marginBottom: 'var(--space-4)',
+              padding: 'var(--space-4)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-surface-2)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
+              <div>
+                <div style={{ fontWeight: 700 }}>Impresora local de este equipo</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
+                  Usa QZ Tray para imprimir en una impresora instalada en este PC.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={localPrinting.onRefresh}
+                disabled={localPrinting.connecting}
+              >
+                {localPrinting.connecting ? 'Buscando...' : 'Detectar'}
+              </button>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" htmlFor="local-printer-select">Impresora local</label>
+              <select
+                id="local-printer-select"
+                className="form-select"
+                value={localPrinting.printerName ?? ''}
+                onChange={(event) => localPrinting.onChange(event.target.value || null)}
+              >
+                <option value="">No usar impresión local</option>
+                {localPrinting.availablePrinters.map((printer) => (
+                  <option key={printer} value={printer}>
+                    {printer}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {!localPrinting.enabled && (
+              <div style={{ marginTop: 'var(--space-2)', fontSize: '0.82rem', color: 'var(--color-warning, #b45309)' }}>
+                Instala y abre QZ Tray en este equipo para habilitar la impresión local.
               </div>
             )}
           </div>
