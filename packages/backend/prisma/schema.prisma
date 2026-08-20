@@ -50,6 +50,7 @@ model Venue {
   nifOverride    String?      @db.VarChar(20)
   nameOverride   String?      @db.VarChar(200)
   invoiceSeries  String       @default("T") @db.VarChar(20)
+  kitchenEnabled Boolean      @default(true)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -373,6 +374,7 @@ model Ticket {
   subtotal  Decimal @db.Decimal(10, 2)
   vatAmount Decimal @db.Decimal(10, 2)
   total     Decimal @db.Decimal(10, 2)
+  paymentMethod PaymentMethod @default(CARD)
 
   hashSelf            String  @db.Char(64)
   hashPrevious        String  @default("0000000000000000000000000000000000000000000000000000000000000000") @db.Char(64)
@@ -395,6 +397,13 @@ model Ticket {
   @@index([venueId, issuedAt])
   @@index([aeatStatus])
   @@map("tickets")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+
+  @@map("payment_method")
 }
 
 model CashClosure {

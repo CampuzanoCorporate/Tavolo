@@ -9,6 +9,7 @@ import { decodeMenuSelection } from '../../utils/menuSelection';
 
 interface CartProps {
   summary: CartSummary;
+  kitchenEnabled?: boolean;
   onSendOrder: () => void;
   onCloseTicket: () => void;
   onRequestBill: () => void;
@@ -22,6 +23,7 @@ interface CartProps {
 
 export function Cart({
   summary,
+  kitchenEnabled = true,
   onSendOrder,
   onCloseTicket,
   onRequestBill,
@@ -289,14 +291,16 @@ export function Cart({
 
         {/* Botones de acción */}
         <div className="cart__actions">
-          <button
-            id="btn-send-order"
-            className="btn btn-send-kitchen btn-full"
-            onClick={onSendOrder}
-            disabled={summary.items.length === 0 || pendingItems.length === 0}
-          >
-            Enviar a cocina
-          </button>
+          {kitchenEnabled && (
+            <button
+              id="btn-send-order"
+              className="btn btn-send-kitchen btn-full"
+              onClick={onSendOrder}
+              disabled={summary.items.length === 0 || pendingItems.length === 0}
+            >
+              Enviar a cocina
+            </button>
+          )}
 
           {activeTable && activeTable.status !== 'BILL_REQUESTED' ? (
             <button

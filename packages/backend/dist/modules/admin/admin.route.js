@@ -20,6 +20,7 @@ const VenueCreateSchema = zod_1.z.object({
     nifOverride: zod_1.z.string().optional(),
     nameOverride: zod_1.z.string().optional(),
     invoiceSeries: zod_1.z.string().min(1).max(20).default('T'),
+    kitchenEnabled: zod_1.z.boolean().default(true),
 });
 const OrgUpdateSchema = zod_1.z.object({
     name: zod_1.z.string().min(2).max(200).optional(),

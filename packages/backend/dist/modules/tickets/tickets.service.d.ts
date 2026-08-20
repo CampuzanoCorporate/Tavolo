@@ -12,6 +12,7 @@ export interface CloseTicketInput {
     orderId: number;
     userId: number;
     venueId: number;
+    paymentMethod: 'CASH' | 'CARD';
     /** IP de impresora de caja. Si no se proporciona, no imprime. */
     printerIp?: string;
     printerPort?: number;
@@ -41,6 +42,9 @@ export interface CashSummaryResult {
     openingAmount: number;
     manualInTotal: number;
     manualOutTotal: number;
+    cashSalesTotal: number;
+    cardSalesTotal: number;
+    vatTotal: number;
     expectedAmount: number;
     tickets: Array<{
         id: number;
@@ -81,6 +85,7 @@ export interface ClosePartialTicketInput {
     originalOrderId: number;
     userId: number;
     venueId: number;
+    paymentMethod: 'CASH' | 'CARD';
     items: Array<{
         productId: number;
         quantity: number;
@@ -164,6 +169,7 @@ export declare function getTicketPreview(ticketId: number): Promise<{
         venueId: number;
         invoiceSeries: string;
         orderId: number;
+        paymentMethod: import(".prisma/client").$Enums.PaymentMethod;
         invoiceNumber: number;
         invoiceCode: string;
         subtotal: Prisma.Decimal;
@@ -222,17 +228,19 @@ export declare function addCashMovement(input: {
     userId: number;
     venueId: number;
     type: import(".prisma/client").$Enums.CashMovementType;
+    amount: Prisma.Decimal;
     description: string | null;
     ticketId: number | null;
     sessionId: number;
-    amount: Prisma.Decimal;
 }>;
 export declare function closeCashRegister(input: {
     venueId: number;
     userId: number;
     countedAmount: number;
     notes?: string;
-}): Promise<{
+    printerIp?: string;
+    printerPort?: number;
+}): Promise<({
     user: {
         id: number;
         name: string;
@@ -243,16 +251,40 @@ export declare function closeCashRegister(input: {
     userId: number;
     venueId: number;
     notes: string | null;
+    openingAmount: Prisma.Decimal;
+    expectedAmount: Prisma.Decimal;
+    countedAmount: Prisma.Decimal;
+    discrepancyAmount: Prisma.Decimal;
     sessionId: number | null;
     periodStart: Date;
     periodEnd: Date;
     ticketCount: number;
     billedTotal: Prisma.Decimal;
-    openingAmount: Prisma.Decimal;
     manualInTotal: Prisma.Decimal;
     manualOutTotal: Prisma.Decimal;
+}) | {
+    preview: string;
+    rawBase64: string;
+    printed: boolean;
+    user: {
+        id: number;
+        name: string;
+    };
+    id: number;
+    createdAt: Date;
+    userId: number;
+    venueId: number;
+    notes: string | null;
+    openingAmount: Prisma.Decimal;
     expectedAmount: Prisma.Decimal;
     countedAmount: Prisma.Decimal;
     discrepancyAmount: Prisma.Decimal;
+    sessionId: number | null;
+    periodStart: Date;
+    periodEnd: Date;
+    ticketCount: number;
+    billedTotal: Prisma.Decimal;
+    manualInTotal: Prisma.Decimal;
+    manualOutTotal: Prisma.Decimal;
 }>;
 //# sourceMappingURL=tickets.service.d.ts.map

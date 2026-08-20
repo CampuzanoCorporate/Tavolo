@@ -69,8 +69,39 @@ async function buildStoredTicketQrBase64(params) {
         idioma: 'es',
     }, config_1.config.server.isDev ? 'preproduction' : 'production');
 }
+async function getOrCreateActiveCashSession(tx, input) {
+    const existingSession = await tx.cashSession.findFirst({
+        where: {
+            venueId: input.venueId,
+            status: client_1.CashSessionStatus.OPEN,
+        },
+        select: { id: true },
+    });
+    if (existingSession) {
+        return existingSession;
+    }
+    return tx.cashSession.create({
+        data: {
+            venueId: input.venueId,
+            openedByUserId: input.userId,
+            openingAmount: new client_1.Prisma.Decimal(0),
+            openingNotes: 'Apertura automática al emitir el primer ticket',
+            status: client_1.CashSessionStatus.OPEN,
+            movements: {
+                create: {
+                    venueId: input.venueId,
+                    userId: input.userId,
+                    type: client_1.CashMovementType.OPENING,
+                    amount: new client_1.Prisma.Decimal(0),
+                    description: 'Apertura automática de caja',
+                },
+            },
+        },
+        select: { id: true },
+    });
+}
 async function closeTicket(input) {
-    const { orderId, userId, venueId, printerIp, printerPort = 9100 } = input;
+    const { orderId, userId, venueId, paymentMethod, printerIp, printerPort = 9100 } = input;
     // ── 1. Cargar pedido con items ────────────────────────────────────────────
     const order = await client_2.prisma.order.findUnique({
         where: { id: orderId },
@@ -154,6 +185,7 @@ async function closeTicket(input) {
                 subtotal: new client_1.Prisma.Decimal(subtotal),
                 vatAmount: new client_1.Prisma.Decimal(vatAmount),
                 total: new client_1.Prisma.Decimal(total),
+                paymentMethod: paymentMethod,
                 hashSelf,
                 hashPrevious: previousHash,
                 previousInvoiceCode: last?.invoiceCode ?? null,
@@ -165,27 +197,18 @@ async function closeTicket(input) {
             },
         });
         try {
-            const activeSession = await tx.cashSession.findFirst({
-                where: {
+            const activeSession = await getOrCreateActiveCashSession(tx, { venueId, userId });
+            await tx.cashMovement.create({
+                data: {
                     venueId,
-                    status: client_1.CashSessionStatus.OPEN,
+                    sessionId: activeSession.id,
+                    userId,
+                    ticketId: newTicket.id,
+                    type: client_1.CashMovementType.TICKET,
+                    amount: new client_1.Prisma.Decimal(total),
+                    description: `Ticket ${newTicket.invoiceCode} (${paymentMethod === 'CASH' ? 'Efectivo' : 'Tarjeta'})`,
                 },
-                orderBy: { openedAt: 'desc' },
-                select: { id: true },
             });
-            if (activeSession) {
-                await tx.cashMovement.create({
-                    data: {
-                        venueId,
-                        sessionId: activeSession.id,
-                        userId,
-                        ticketId: newTicket.id,
-                        type: client_1.CashMovementType.TICKET,
-                        amount: new client_1.Prisma.Decimal(total),
-                        description: `Ticket ${newTicket.invoiceCode}`,
-                    },
-                });
-            }
         }
         catch (error) {
             if (!isMissingCashTables(error))
@@ -290,7 +313,7 @@ async function closeTicket(input) {
     return { ticketId: ticket.id, invoiceCode: ticket.invoiceCode, total, qrBase64 };
 }
 async function closePartialTicket(input) {
-    const { originalOrderId, userId, venueId, items, splitMode = 'QUANTITY', printerIp, printerPort = 9100 } = input;
+    const { originalOrderId, userId, venueId, paymentMethod, items, splitMode = 'QUANTITY', printerIp, printerPort = 9100 } = input;
     // 1. Cargar el pedido original
     const originalOrder = await client_2.prisma.order.findUnique({
         where: { id: originalOrderId },
@@ -375,6 +398,7 @@ async function closePartialTicket(input) {
         orderId: partialOrder.id,
         userId,
         venueId,
+        paymentMethod,
         printerIp,
         printerPort,
     });
@@ -577,6 +601,8 @@ async function getCashSummary(venueId) {
                 invoiceCode: true,
                 issuedAt: true,
                 total: true,
+                vatAmount: true,
+                paymentMethod: true,
             },
         }),
         client_2.prisma.ticket.aggregate({
@@ -606,6 +632,13 @@ async function getCashSummary(venueId) {
         .filter((movement) => movement.type === client_1.CashMovementType.CASH_OUT)
         .reduce((sum, movement) => sum + Number(movement.amount), 0);
     const billedTotal = Number(aggregate._sum.total ?? 0);
+    const cashSalesTotal = tickets
+        .filter((ticket) => ticket.paymentMethod === client_1.PaymentMethod.CASH)
+        .reduce((sum, ticket) => sum + Number(ticket.total), 0);
+    const cardSalesTotal = tickets
+        .filter((ticket) => ticket.paymentMethod === client_1.PaymentMethod.CARD)
+        .reduce((sum, ticket) => sum + Number(ticket.total), 0);
+    const vatTotal = tickets.reduce((sum, ticket) => sum + Number(ticket.vatAmount), 0);
     const expectedAmount = Math.round((openingAmount + billedTotal + manualInTotal - manualOutTotal) * 100) / 100;
     return {
         activeSession: activeSession
@@ -625,6 +658,9 @@ async function getCashSummary(venueId) {
         openingAmount,
         manualInTotal,
         manualOutTotal,
+        cashSalesTotal: Math.round(cashSalesTotal * 100) / 100,
+        cardSalesTotal: Math.round(cardSalesTotal * 100) / 100,
+        vatTotal: Math.round(vatTotal * 100) / 100,
         expectedAmount,
         tickets,
         movements: movements.map((movement) => ({
@@ -724,8 +760,9 @@ async function closeCashRegister(input) {
     }
     const discrepancyAmount = Math.round((input.countedAmount - summary.expectedAmount) * 100) / 100;
     let closure;
+    let venueData = null;
     try {
-        closure = await client_2.prisma.$transaction(async (tx) => {
+        [closure, venueData] = await client_2.prisma.$transaction(async (tx) => {
             await tx.cashSession.update({
                 where: { id: summary.activeSession.id },
                 data: {
@@ -738,7 +775,7 @@ async function closeCashRegister(input) {
                     closingNotes: input.notes,
                 },
             });
-            return tx.cashClosure.create({
+            const createdClosure = await tx.cashClosure.create({
                 data: {
                     venueId: input.venueId,
                     userId: input.userId,
@@ -761,6 +798,15 @@ async function closeCashRegister(input) {
                     },
                 },
             });
+            const currentVenue = await tx.venue.findUnique({
+                where: { id: input.venueId },
+                include: {
+                    organisation: {
+                        select: { name: true, nif: true, address: true },
+                    },
+                },
+            });
+            return [createdClosure, currentVenue];
         });
     }
     catch (error) {
@@ -769,6 +815,69 @@ async function closeCashRegister(input) {
         }
         throw error;
     }
-    return closure;
+    if (!venueData) {
+        return closure;
+    }
+    const effectiveNif = venueData.useOrgNif ? venueData.organisation.nif : (venueData.nifOverride ?? venueData.organisation.nif);
+    const effectiveName = venueData.useOrgNif ? venueData.organisation.name : (venueData.nameOverride ?? venueData.organisation.name);
+    const effectiveAddress = venueData.address ?? venueData.organisation.address ?? '';
+    const logoPngBase64 = await (0, logo_service_1.getTicketLogoBase64)(venueData.organisationId);
+    const printableClosure = {
+        businessName: effectiveName,
+        businessNif: effectiveNif,
+        businessAddress: effectiveAddress,
+        venueName: venueData.name,
+        openedAt: summary.activeSession.openedAt,
+        closedAt: summary.periodEnd,
+        closedByName: closure.user.name,
+        openingAmount: summary.openingAmount,
+        cashSalesTotal: summary.cashSalesTotal,
+        cardSalesTotal: summary.cardSalesTotal,
+        billedTotal: summary.billedTotal,
+        vatTotal: summary.vatTotal,
+        manualInTotal: summary.manualInTotal,
+        manualOutTotal: summary.manualOutTotal,
+        expectedAmount: summary.expectedAmount,
+        countedAmount: input.countedAmount,
+        discrepancyAmount,
+        notes: input.notes,
+        logoPngBase64,
+    };
+    const closureBuffer = (0, printer_service_1.buildCashClosureBuffer)(printableClosure);
+    const closurePreview = (0, printer_service_1.buildCashClosurePreviewText)(printableClosure);
+    let printed = false;
+    if (input.printerIp) {
+        await (0, printer_service_1.sendToPrinter)({
+            connectionType: 'NETWORK',
+            ipAddress: input.printerIp,
+            port: input.printerPort ?? 9100,
+        }, closureBuffer);
+        printed = true;
+    }
+    else {
+        const printer = await client_2.prisma.printer.findFirst({
+            where: {
+                venueId: input.venueId,
+                type: 'RECEIPT',
+                isActive: true,
+            },
+            orderBy: { id: 'asc' },
+        });
+        if (printer) {
+            await (0, printer_service_1.sendToPrinter)({
+                connectionType: printer.connectionType,
+                ipAddress: printer.ipAddress ?? undefined,
+                port: printer.port ?? undefined,
+                systemName: printer.systemName ?? undefined,
+            }, closureBuffer);
+            printed = true;
+        }
+    }
+    return {
+        ...closure,
+        preview: closurePreview,
+        rawBase64: closureBuffer.toString('base64'),
+        printed,
+    };
 }
 //# sourceMappingURL=tickets.service.js.map

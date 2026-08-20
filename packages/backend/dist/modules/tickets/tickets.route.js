@@ -8,12 +8,14 @@ const guards_1 = require("../auth/guards");
 const CloseTicketSchema = zod_1.z.object({
     orderId: zod_1.z.number().int().positive(),
     venueId: zod_1.z.number().int().positive(),
+    paymentMethod: zod_1.z.enum(['CASH', 'CARD']),
     printerIp: zod_1.z.string().ip().optional(),
     printerPort: zod_1.z.number().int().optional(),
 });
 const ClosePartialTicketSchema = zod_1.z.object({
     originalOrderId: zod_1.z.number().int().positive(),
     venueId: zod_1.z.number().int().positive(),
+    paymentMethod: zod_1.z.enum(['CASH', 'CARD']),
     items: zod_1.z.array(zod_1.z.object({
         productId: zod_1.z.number().int().positive(),
         quantity: zod_1.z.number().int().positive(),
@@ -29,6 +31,8 @@ const CloseCashSchema = zod_1.z.object({
     venueId: zod_1.z.number().int().positive(),
     countedAmount: zod_1.z.coerce.number().min(0),
     notes: zod_1.z.string().trim().max(500).optional(),
+    printerIp: zod_1.z.string().ip().optional(),
+    printerPort: zod_1.z.number().int().optional(),
 });
 const OpenCashSchema = zod_1.z.object({
     venueId: zod_1.z.number().int().positive(),
@@ -118,6 +122,8 @@ async function ticketsRoutes(fastify) {
             userId: request.user.userId,
             countedAmount: body.countedAmount,
             notes: body.notes,
+            printerIp: body.printerIp,
+            printerPort: body.printerPort,
         });
         return reply.status(201).send({ data: closure });
     });

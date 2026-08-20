@@ -9,6 +9,7 @@ import { useAppStore } from '../store/useAppStore';
 import { ordersApi, printersApi, tablesApi, ticketsApi } from '../services/api';
 import { cacheTables, getCachedTables } from '../services/offlineStorage';
 import { KitchenNoteModal } from '../components/pos/KitchenNoteModal';
+import { printRawBase64WithQzTray } from '../services/qzTray';
 import type { CashSummaryData, Table } from '../types';
 
 const LEGACY_POSITION_THRESHOLD = 100;
@@ -125,7 +126,7 @@ function ServiceIcon({ type }: { type: 'tables' | 'cash' | 'merge' | 'drawer' | 
 
 export function TableMapPage() {
   const navigate = useNavigate();
-  const { tables, setTables, setActiveTable, isOnline, currentVenueId } = useAppStore();
+  const { tables, setTables, setActiveTable, isOnline, currentVenueId, currentVenue, selectedPrinterIp, selectedLocalPrinterName } = useAppStore();
   const [activeZone, setActiveZone] = useState<string>('');
   const [isKitchenNoteModalOpen, setIsKitchenNoteModalOpen] = useState(false);
   const [isSendingKitchenNote, setIsSendingKitchenNote] = useState(false);
@@ -417,7 +418,24 @@ export function TableMapPage() {
 
     try {
       setIsClosingCash(true);
-      await ticketsApi.closeCash({ venueId: currentVenueId, countedAmount, notes: cashNotes || undefined });
+      const useLocalPrinting = !!selectedLocalPrinterName;
+      const useServerPrinting = !useLocalPrinting && !!selectedPrinterIp;
+      const closure = await ticketsApi.closeCash({
+        venueId: currentVenueId,
+        countedAmount,
+        notes: cashNotes || undefined,
+        printerIp: useServerPrinting ? (selectedPrinterIp || undefined) : undefined,
+      });
+
+      if (useLocalPrinting && closure.rawBase64) {
+        try {
+          await printRawBase64WithQzTray(selectedLocalPrinterName, closure.rawBase64);
+        } catch (printError) {
+          console.error('[TableMap] Error imprimiendo cierre de caja en QZ Tray:', printError);
+          toast.error('Se registró el cierre, pero no se pudo imprimir en la impresora local');
+        }
+      }
+
       toast.success('Cierre de caja registrado');
       setCashNotes('');
       setCashCountedAmount('');
@@ -457,10 +475,12 @@ export function TableMapPage() {
           <span className="table-map-service-rail__icon"><ServiceIcon type="drawer" /></span>
           <span className="table-map-service-rail__btn-label">{isOpeningDrawer ? 'Abriendo...' : 'Abrir cajon'}</span>
         </button>
-        <button className="table-map-service-rail__btn table-map-service-rail__btn--accent" onClick={() => setIsKitchenNoteModalOpen(true)}>
-          <span className="table-map-service-rail__icon"><ServiceIcon type="kitchen" /></span>
-          <span className="table-map-service-rail__btn-label">Avisar a cocina</span>
-        </button>
+        {currentVenue?.kitchenEnabled !== false && (
+          <button className="table-map-service-rail__btn table-map-service-rail__btn--accent" onClick={() => setIsKitchenNoteModalOpen(true)}>
+            <span className="table-map-service-rail__icon"><ServiceIcon type="kitchen" /></span>
+            <span className="table-map-service-rail__btn-label">Avisar a cocina</span>
+          </button>
+        )}
       </aside>
 
       <div className="table-map-content">
@@ -609,7 +629,7 @@ export function TableMapPage() {
         </div>
         )}
 
-      {isKitchenNoteModalOpen && (
+      {currentVenue?.kitchenEnabled !== false && isKitchenNoteModalOpen && (
         <KitchenNoteModal
           tables={tables}
           isSubmitting={isSendingKitchenNote}

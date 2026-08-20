@@ -422,6 +422,15 @@ async function ordersRoutes(fastify) {
         if (!(0, guards_1.requirePermission)(request, reply, 'SEND_KITCHEN_NOTE'))
             return;
         const body = KitchenNoteSchema.parse(request.body);
+        const venue = await client_1.prisma.venue.findUnique({
+            where: { id: body.venueId },
+            select: { kitchenEnabled: true },
+        });
+        if (!venue)
+            return reply.status(404).send({ error: 'Sede no encontrada' });
+        if (!venue.kitchenEnabled) {
+            return reply.status(400).send({ error: 'La cocina está desactivada en esta sede' });
+        }
         const [waiter, kitchenPrinters, table, activeOrder] = await Promise.all([
             client_1.prisma.user.findUnique({ where: { id: request.user.userId }, select: { name: true } }),
             client_1.prisma.printer.findMany({ where: { venueId: body.venueId, type: 'KITCHEN', isActive: true } }),
@@ -503,6 +512,15 @@ async function ordersRoutes(fastify) {
      */
     fastify.patch('/:id/send-kitchen', async (request, reply) => {
         const orderId = parseInt(request.params.id, 10);
+        const existingOrder = await client_1.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { venue: { select: { kitchenEnabled: true } } },
+        });
+        if (!existingOrder)
+            return reply.status(404).send({ error: 'Pedido no encontrado' });
+        if (!existingOrder.venue.kitchenEnabled) {
+            return reply.status(400).send({ error: 'La cocina está desactivada en esta sede' });
+        }
         const order = await client_1.prisma.$transaction(async (tx) => {
             const updatedOrder = await tx.order.update({
                 where: { id: orderId },

@@ -10,6 +10,7 @@ import { canAccessVenue, requirePermission } from '../auth/guards';
 const CloseTicketSchema = z.object({
   orderId:     z.number().int().positive(),
   venueId:     z.number().int().positive(),
+  paymentMethod: z.enum(['CASH', 'CARD']),
   printerIp:   z.string().ip().optional(),
   printerPort: z.number().int().optional(),
 });
@@ -17,6 +18,7 @@ const CloseTicketSchema = z.object({
 const ClosePartialTicketSchema = z.object({
   originalOrderId: z.number().int().positive(),
   venueId:         z.number().int().positive(),
+  paymentMethod:   z.enum(['CASH', 'CARD']),
   items: z.array(z.object({
     productId:   z.number().int().positive(),
     quantity:    z.number().int().positive(),
@@ -33,6 +35,8 @@ const CloseCashSchema = z.object({
   venueId: z.number().int().positive(),
   countedAmount: z.coerce.number().min(0),
   notes: z.string().trim().max(500).optional(),
+  printerIp: z.string().ip().optional(),
+  printerPort: z.number().int().optional(),
 });
 
 const OpenCashSchema = z.object({
@@ -126,6 +130,8 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
       userId: request.user.userId,
       countedAmount: body.countedAmount,
       notes: body.notes,
+      printerIp: body.printerIp,
+      printerPort: body.printerPort,
     });
     return reply.status(201).send({ data: closure });
   });

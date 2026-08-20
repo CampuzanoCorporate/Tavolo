@@ -91,6 +91,27 @@ export interface KitchenMessageData {
     reference?: string;
     createdAt: Date;
 }
+export interface PrintCashClosureData {
+    businessName: string;
+    businessNif: string;
+    businessAddress: string;
+    venueName: string;
+    closedAt: Date;
+    openedAt: Date;
+    closedByName: string;
+    openingAmount: number;
+    cashSalesTotal: number;
+    cardSalesTotal: number;
+    billedTotal: number;
+    vatTotal: number;
+    manualInTotal: number;
+    manualOutTotal: number;
+    expectedAmount: number;
+    countedAmount: number;
+    discrepancyAmount: number;
+    notes?: string | null;
+    logoPngBase64?: string | null;
+}
 /**
  * Envía un buffer de datos a una impresora de red vía TCP.
  *
@@ -109,6 +130,8 @@ export declare function listSystemPrinters(): Promise<string[]>;
  */
 export declare function buildTicketBuffer(data: PrintTicketData): Buffer;
 export declare function buildTicketPreviewText(data: PrintTicketData): string;
+export declare function buildCashClosureBuffer(data: PrintCashClosureData): Buffer;
+export declare function buildCashClosurePreviewText(data: PrintCashClosureData): string;
 /**
  * Construye el buffer ESC/POS de una comanda de cocina.
  * Letra grande para máxima legibilidad en cocina.

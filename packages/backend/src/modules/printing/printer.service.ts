@@ -141,6 +141,28 @@ export interface KitchenMessageData {
   createdAt: Date;
 }
 
+export interface PrintCashClosureData {
+  businessName: string;
+  businessNif: string;
+  businessAddress: string;
+  venueName: string;
+  closedAt: Date;
+  openedAt: Date;
+  closedByName: string;
+  openingAmount: number;
+  cashSalesTotal: number;
+  cardSalesTotal: number;
+  billedTotal: number;
+  vatTotal: number;
+  manualInTotal: number;
+  manualOutTotal: number;
+  expectedAmount: number;
+  countedAmount: number;
+  discrepancyAmount: number;
+  notes?: string | null;
+  logoPngBase64?: string | null;
+}
+
 // ─── FUNCIÓN PRINCIPAL ─────────────────────────────────────────────────────
 
 /**
@@ -384,6 +406,109 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
   lines.push('Gracias por su visita');
 
   return lines.join('\n');
+}
+
+export function buildCashClosureBuffer(data: PrintCashClosureData): Buffer {
+  const parts: Buffer[] = [];
+  const normalizeText = (value: string) => value
+    .normalize('NFC')
+    .replaceAll('€', 'EUR')
+    .replaceAll('’', "'")
+    .replaceAll('‘', "'")
+    .replaceAll('“', '"')
+    .replaceAll('”', '"')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-');
+  const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
+  const nl = ESCPOS.NEWLINE;
+  const line = (char = '-', length = 42) => text(char.repeat(length));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatDate = (value: Date) => `${pad(value.getDate())}/${pad(value.getMonth() + 1)}/${value.getFullYear()} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
+
+  parts.push(ESCPOS.INIT);
+  parts.push(ESCPOS.CODEPAGE_WCP1252);
+
+  if (data.logoPngBase64) {
+    const logoBuffer = buildEscPosImageBuffer(data.logoPngBase64);
+    if (logoBuffer) {
+      parts.push(ESCPOS.ALIGN_CENTER, logoBuffer, nl);
+    }
+  }
+
+  parts.push(ESCPOS.ALIGN_CENTER, ESCPOS.BOLD_ON, ESCPOS.DOUBLE_SIZE_ON);
+  parts.push(text(data.businessName.toUpperCase().substring(0, 20)), nl);
+  parts.push(ESCPOS.DOUBLE_SIZE_OFF, ESCPOS.BOLD_OFF);
+  parts.push(text(data.businessAddress), nl);
+  parts.push(text(`NIF: ${data.businessNif}`), nl, nl);
+  parts.push(ESCPOS.BOLD_ON, text('CIERRE DE CAJA'), nl, ESCPOS.BOLD_OFF);
+  parts.push(text(data.venueName), nl);
+  parts.push(line(), nl);
+
+  parts.push(ESCPOS.ALIGN_LEFT);
+  parts.push(text(`Apertura: ${formatDate(data.openedAt)}`), nl);
+  parts.push(text(`Cierre:   ${formatDate(data.closedAt)}`), nl);
+  parts.push(text(`Usuario:  ${data.closedByName}`), nl);
+  parts.push(line(), nl);
+
+  parts.push(text(`Apertura caja: ${data.openingAmount.toFixed(2)} EUR`), nl);
+  parts.push(text(`Ventas efectivo: ${data.cashSalesTotal.toFixed(2)} EUR`), nl);
+  parts.push(text(`Ventas tarjeta:  ${data.cardSalesTotal.toFixed(2)} EUR`), nl);
+  parts.push(text(`Facturado total: ${data.billedTotal.toFixed(2)} EUR`), nl);
+  parts.push(text(`IVA total:       ${data.vatTotal.toFixed(2)} EUR`), nl);
+  parts.push(text(`Entradas caja:   ${data.manualInTotal.toFixed(2)} EUR`), nl);
+  parts.push(text(`Salidas caja:    ${data.manualOutTotal.toFixed(2)} EUR`), nl);
+  parts.push(line(), nl);
+  parts.push(text(`Esperado caja:   ${data.expectedAmount.toFixed(2)} EUR`), nl);
+  parts.push(text(`Contado caja:    ${data.countedAmount.toFixed(2)} EUR`), nl);
+  parts.push(ESCPOS.BOLD_ON);
+  parts.push(text(`Diferencia:      ${data.discrepancyAmount.toFixed(2)} EUR`), nl);
+  parts.push(ESCPOS.BOLD_OFF);
+
+  if (data.notes) {
+    parts.push(line(), nl);
+    parts.push(text('Notas:'), nl);
+    parts.push(text(data.notes.substring(0, 42)), nl);
+  }
+
+  parts.push(nl);
+  parts.push(ESCPOS.ALIGN_CENTER, text('Cierre generado por Tavolo POS'), nl, nl, nl);
+  parts.push(ESCPOS.CUT_PARTIAL);
+
+  return Buffer.concat(parts);
+}
+
+export function buildCashClosurePreviewText(data: PrintCashClosureData): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const formatDate = (value: Date) => `${pad(value.getDate())}/${pad(value.getMonth() + 1)}/${value.getFullYear()} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
+
+  return [
+    ...(data.logoPngBase64 ? ['[Logo del negocio]'] : []),
+    data.businessName.toUpperCase(),
+    data.businessAddress,
+    `NIF: ${data.businessNif}`,
+    '==========================================',
+    'CIERRE DE CAJA',
+    data.venueName,
+    '------------------------------------------',
+    `Apertura: ${formatDate(data.openedAt)}`,
+    `Cierre:   ${formatDate(data.closedAt)}`,
+    `Usuario:  ${data.closedByName}`,
+    '------------------------------------------',
+    `Apertura caja: ${data.openingAmount.toFixed(2)} EUR`,
+    `Ventas efectivo: ${data.cashSalesTotal.toFixed(2)} EUR`,
+    `Ventas tarjeta:  ${data.cardSalesTotal.toFixed(2)} EUR`,
+    `Facturado total: ${data.billedTotal.toFixed(2)} EUR`,
+    `IVA total:       ${data.vatTotal.toFixed(2)} EUR`,
+    `Entradas caja:   ${data.manualInTotal.toFixed(2)} EUR`,
+    `Salidas caja:    ${data.manualOutTotal.toFixed(2)} EUR`,
+    '------------------------------------------',
+    `Esperado caja:   ${data.expectedAmount.toFixed(2)} EUR`,
+    `Contado caja:    ${data.countedAmount.toFixed(2)} EUR`,
+    `Diferencia:      ${data.discrepancyAmount.toFixed(2)} EUR`,
+    ...(data.notes ? ['------------------------------------------', 'Notas:', data.notes] : []),
+    '',
+    'Cierre generado por Tavolo POS',
+  ].join('\n');
 }
 
 function buildEscPosImageBuffer(base64Png: string): Buffer | null {

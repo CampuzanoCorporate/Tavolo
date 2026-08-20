@@ -93,12 +93,13 @@ export const ordersApi = {
 
 // ── Tickets ───────────────────────────────────────────────────────────────────
 export const ticketsApi = {
-  close: (data: { orderId: number; venueId: number; printerIp?: string; printerPort?: number }) =>
+  close: (data: { orderId: number; venueId: number; paymentMethod: 'CASH' | 'CARD'; printerIp?: string; printerPort?: number }) =>
     apiClient.post<{ data: { ticketId: number; invoiceCode: string; total: number; qrBase64?: string } }>
       ('/api/tickets/close', data).then((r) => r.data.data),
   closePartial: (data: {
     originalOrderId: number;
     venueId: number;
+    paymentMethod: 'CASH' | 'CARD';
     items: Array<{ productId: number; quantity: number; unitPrice: number; vatRate: number; notes?: string | null }>;
     splitMode?: 'QUANTITY' | 'PRICE';
     printerIp?: string;
@@ -118,7 +119,7 @@ export const ticketsApi = {
     apiClient.post('/api/tickets/cash/open', data).then((r) => r.data.data),
   addCashMovement: (data: { venueId: number; type: 'CASH_IN' | 'CASH_OUT'; amount: number; description: string }) =>
     apiClient.post('/api/tickets/cash/movements', data).then((r) => r.data.data),
-  closeCash: (data: { venueId: number; countedAmount: number; notes?: string }) =>
+  closeCash: (data: { venueId: number; countedAmount: number; notes?: string; printerIp?: string; printerPort?: number }) =>
     apiClient.post('/api/tickets/cash/close', data).then((r) => r.data.data),
 };
 

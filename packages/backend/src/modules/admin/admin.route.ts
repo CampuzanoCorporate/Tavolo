@@ -37,6 +37,7 @@ const VenueCreateSchema = z.object({
   nifOverride: z.string().optional(),
   nameOverride: z.string().optional(),
   invoiceSeries: z.string().min(1).max(20).default('T'),
+  kitchenEnabled: z.boolean().default(true),
 });
 
 const OrgUpdateSchema = z.object({

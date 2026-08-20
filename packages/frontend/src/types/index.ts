@@ -71,6 +71,7 @@ export interface Venue {
   nifOverride?: string;
   nameOverride?: string;
   invoiceSeries: string;
+  kitchenEnabled: boolean;
 }
 
 export interface LicenseRecord {
@@ -386,6 +387,9 @@ export interface CashSummaryData {
   openingAmount: number;
   manualInTotal: number;
   manualOutTotal: number;
+  cashSalesTotal: number;
+  cardSalesTotal: number;
+  vatTotal: number;
   expectedAmount: number;
   tickets: CashSummaryTicket[];
   movements: CashMovement[];
@@ -417,6 +421,9 @@ export interface CashClosure {
   openingAmount: number | string;
   manualInTotal: number | string;
   manualOutTotal: number | string;
+  cashSalesTotal?: number | string;
+  cardSalesTotal?: number | string;
+  vatTotal?: number | string;
   expectedAmount: number | string;
   countedAmount: number | string;
   discrepancyAmount: number | string;
@@ -426,6 +433,8 @@ export interface CashClosure {
     id: number;
     name: string;
   };
+  preview?: string;
+  rawBase64?: string;
 }
 
 // ── Impresoras ────────────────────────────────────────────────────────────────

@@ -90,6 +90,7 @@ export function POSPage() {
     selectedLocalPrinterName,
     setSelectedLocalPrinterName,
     currentVenueId,
+    currentVenue,
   } = useAppStore();
 
   const cartSummary = useCartSummary();
@@ -604,6 +605,10 @@ export function POSPage() {
         toast.error('No hay pedido activo');
         return;
       }
+      if (currentVenue?.kitchenEnabled === false) {
+        setIsPaymentModalOpen(true);
+        return;
+      }
       toast.error('Primero debes enviar a cocina antes de cobrar');
       return;
     }
@@ -663,17 +668,42 @@ export function POSPage() {
   };
 
   const handleConfirmPayment = async (method: 'CASH' | 'CARD', print: boolean, cashDetails?: { delivered: number; change: number }) => {
-    if (!activeOrder) return;
     setIsClosingTicket(true);
 
     try {
+      let orderToCharge = activeOrder;
+      if (!orderToCharge) {
+        if (currentVenue?.kitchenEnabled !== false || !activeTable || !currentVenueId) {
+          return;
+        }
+
+        const pendingItems = cartItems.filter((item) => !item.sent);
+        if (pendingItems.length === 0) {
+          toast.error('No hay artículos para cobrar');
+          return;
+        }
+
+        orderToCharge = await ordersApi.create({
+          tableId: activeTable.id,
+          venueId: currentVenueId,
+          items: pendingItems.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            notes: item.notes,
+          })),
+        });
+        setActiveOrder(orderToCharge);
+      }
+
       const useLocalPrinting = print && !!selectedLocalPrinterName;
       const useServerPrinting = print && !useLocalPrinting && !!selectedPrinterIp;
       let result;
       if (splitBillSelection) {
         result = await ticketsApi.closePartial({
-          originalOrderId: activeOrder.id,
+          originalOrderId: orderToCharge.id,
           venueId: currentVenueId!,
+          paymentMethod: method,
           items: splitBillSelection.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
@@ -686,8 +716,9 @@ export function POSPage() {
         });
       } else {
         result = await ticketsApi.close({
-          orderId: activeOrder.id,
+          orderId: orderToCharge.id,
           venueId: currentVenueId!,
+          paymentMethod: method,
           printerIp: useServerPrinting ? (selectedPrinterIp || undefined) : undefined,
         });
       }
@@ -878,6 +909,7 @@ export function POSPage() {
       {/* Columna 1: Carrito / ticket */}
       <Cart
         summary={cartSummary}
+        kitchenEnabled={currentVenue?.kitchenEnabled !== false}
         onSendOrder={handleSendOrder}
         onCloseTicket={handleCloseTicket}
         onRequestBill={handleRequestBill}
@@ -925,14 +957,16 @@ export function POSPage() {
               >
                 Abrir cajón
               </button>
-              <button
-                className="btn btn-send-kitchen"
-                onClick={() => setIsKitchenNoteModalOpen(true)}
-                type="button"
-                style={{ fontSize: '0.85rem' }}
-              >
-                Avisar a cocina
-              </button>
+              {currentVenue?.kitchenEnabled !== false && (
+                <button
+                  className="btn btn-send-kitchen"
+                  onClick={() => setIsKitchenNoteModalOpen(true)}
+                  type="button"
+                  style={{ fontSize: '0.85rem' }}
+                >
+                  Avisar a cocina
+                </button>
+              )}
               <button
                 className="btn btn-secondary"
                 type="button"
@@ -1021,7 +1055,7 @@ export function POSPage() {
         />
       )}
 
-      {isKitchenNoteModalOpen && (
+      {currentVenue?.kitchenEnabled !== false && isKitchenNoteModalOpen && (
         <KitchenNoteModal
           tables={tables}
           initialTableId={activeTable?.id}

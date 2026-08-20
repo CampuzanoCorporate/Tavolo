@@ -12,7 +12,7 @@ type VenueForm = Partial<Omit<Venue, 'id' | 'organisationId'>>;
 const DEFAULT: VenueForm = {
   name: '', slug: '', address: '', phone: '',
   timezone: 'Europe/Madrid', isActive: true,
-  useOrgNif: true, nifOverride: '', nameOverride: '', invoiceSeries: 'T',
+  useOrgNif: true, nifOverride: '', nameOverride: '', invoiceSeries: 'T', kitchenEnabled: true,
 };
 
 function slugify(s: string) {
@@ -51,6 +51,7 @@ function buildVenuePayload(form: VenueForm): VenueForm {
     nifOverride: form.useOrgNif ? undefined : (trimmedNifOverride || undefined),
     nameOverride: form.useOrgNif ? undefined : (trimmedNameOverride || undefined),
     invoiceSeries: trimmedInvoiceSeries,
+    kitchenEnabled: form.kitchenEnabled ?? true,
   };
 }
 
@@ -206,6 +207,25 @@ export function VenueFormPage() {
               <small style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
                 El código de factura será: {form.invoiceSeries}-{new Date().getFullYear()}-000001
               </small>
+            </div>
+          </section>
+
+          <section className="admin-section">
+            <h2 className="admin-section-title">Operativa de Sala</h2>
+
+            <div className="form-group">
+              <div className="toggle-group">
+                <div>
+                  <label className="form-label" style={{ marginBottom: 4 }}>Cocina habilitada en esta sede</label>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                    Si la desactivas, no aparecerán los botones de avisar o enviar a cocina en el TPV.
+                  </p>
+                </div>
+                <label className="toggle-switch">
+                  <input type="checkbox" checked={form.kitchenEnabled ?? true} onChange={(e) => set('kitchenEnabled', e.target.checked)} />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
             </div>
           </section>
         </div>

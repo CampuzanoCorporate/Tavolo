@@ -7,7 +7,7 @@
  * El encadenamiento de hashes es por venueId.
  * ============================================================
  */
-import { CashMovementType, CashSessionStatus, Prisma, OrderStatus, TableStatus } from '@prisma/client';
+import { CashMovementType, CashSessionStatus, PaymentMethod, Prisma, OrderStatus, TableStatus } from '@prisma/client';
 import { prisma } from '../../db/client';
 import {
   computeVerifactuHash,
@@ -17,7 +17,7 @@ import {
 } from '../verifactu/hash.service';
 import { buildTicketBreakdown, submitVerifactuRecord } from '../verifactu/aeat.service';
 import { generateVerifactuQrBase64 } from '../verifactu/qr.service';
-import { buildTicketBuffer, buildTicketPreviewText, sendToPrinter } from '../printing/printer.service';
+import { buildCashClosureBuffer, buildCashClosurePreviewText, buildTicketBuffer, buildTicketPreviewText, sendToPrinter } from '../printing/printer.service';
 import { config } from '../../config';
 import { getVisibleNotes } from '../orders/menuSelection';
 import { getTicketLogoBase64 } from '../printing/logo.service';
@@ -26,6 +26,7 @@ export interface CloseTicketInput {
   orderId: number;
   userId: number;
   venueId: number;
+  paymentMethod: 'CASH' | 'CARD';
   /** IP de impresora de caja. Si no se proporciona, no imprime. */
   printerIp?: string;
   printerPort?: number;
@@ -54,6 +55,9 @@ export interface CashSummaryResult {
   openingAmount: number;
   manualInTotal: number;
   manualOutTotal: number;
+  cashSalesTotal: number;
+  cardSalesTotal: number;
+  vatTotal: number;
   expectedAmount: number;
   tickets: Array<{
     id: number;
@@ -160,8 +164,45 @@ async function buildStoredTicketQrBase64(params: {
   );
 }
 
+async function getOrCreateActiveCashSession(
+  tx: Prisma.TransactionClient,
+  input: { venueId: number; userId: number },
+) {
+  const existingSession = await tx.cashSession.findFirst({
+    where: {
+      venueId: input.venueId,
+      status: CashSessionStatus.OPEN,
+    },
+    select: { id: true },
+  });
+
+  if (existingSession) {
+    return existingSession;
+  }
+
+  return tx.cashSession.create({
+    data: {
+      venueId: input.venueId,
+      openedByUserId: input.userId,
+      openingAmount: new Prisma.Decimal(0),
+      openingNotes: 'Apertura automática al emitir el primer ticket',
+      status: CashSessionStatus.OPEN,
+      movements: {
+        create: {
+          venueId: input.venueId,
+          userId: input.userId,
+          type: CashMovementType.OPENING,
+          amount: new Prisma.Decimal(0),
+          description: 'Apertura automática de caja',
+        },
+      },
+    },
+    select: { id: true },
+  });
+}
+
 export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketResult> {
-  const { orderId, userId, venueId, printerIp, printerPort = 9100 } = input;
+  const { orderId, userId, venueId, paymentMethod, printerIp, printerPort = 9100 } = input;
 
   // ── 1. Cargar pedido con items ────────────────────────────────────────────
   const order = await prisma.order.findUnique({
@@ -256,6 +297,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
         subtotal:            new Prisma.Decimal(subtotal),
         vatAmount:           new Prisma.Decimal(vatAmount),
         total:               new Prisma.Decimal(total),
+        paymentMethod:       paymentMethod as PaymentMethod,
         hashSelf,
         hashPrevious:        previousHash,
         previousInvoiceCode: last?.invoiceCode ?? null,
@@ -268,28 +310,18 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
     });
 
     try {
-      const activeSession = await tx.cashSession.findFirst({
-        where: {
+      const activeSession = await getOrCreateActiveCashSession(tx, { venueId, userId });
+      await tx.cashMovement.create({
+        data: {
           venueId,
-          status: CashSessionStatus.OPEN,
+          sessionId: activeSession.id,
+          userId,
+          ticketId: newTicket.id,
+          type: CashMovementType.TICKET,
+          amount: new Prisma.Decimal(total),
+          description: `Ticket ${newTicket.invoiceCode} (${paymentMethod === 'CASH' ? 'Efectivo' : 'Tarjeta'})`,
         },
-        orderBy: { openedAt: 'desc' },
-        select: { id: true },
       });
-
-      if (activeSession) {
-        await tx.cashMovement.create({
-          data: {
-            venueId,
-            sessionId: activeSession.id,
-            userId,
-            ticketId: newTicket.id,
-            type: CashMovementType.TICKET,
-            amount: new Prisma.Decimal(total),
-            description: `Ticket ${newTicket.invoiceCode}`,
-          },
-        });
-      }
     } catch (error) {
       if (!isMissingCashTables(error)) throw error;
     }
@@ -404,6 +436,7 @@ export interface ClosePartialTicketInput {
   originalOrderId: number;
   userId: number;
   venueId: number;
+  paymentMethod: 'CASH' | 'CARD';
   items: Array<{
     productId: number;
     quantity: number;
@@ -417,7 +450,7 @@ export interface ClosePartialTicketInput {
 }
 
 export async function closePartialTicket(input: ClosePartialTicketInput): Promise<CloseTicketResult> {
-  const { originalOrderId, userId, venueId, items, splitMode = 'QUANTITY', printerIp, printerPort = 9100 } = input;
+  const { originalOrderId, userId, venueId, paymentMethod, items, splitMode = 'QUANTITY', printerIp, printerPort = 9100 } = input;
 
   // 1. Cargar el pedido original
   const originalOrder = await prisma.order.findUnique({
@@ -510,6 +543,7 @@ export async function closePartialTicket(input: ClosePartialTicketInput): Promis
     orderId: partialOrder.id,
     userId,
     venueId,
+    paymentMethod,
     printerIp,
     printerPort,
   });
@@ -741,6 +775,8 @@ export async function getCashSummary(venueId: number): Promise<CashSummaryResult
         invoiceCode: true,
         issuedAt: true,
         total: true,
+        vatAmount: true,
+        paymentMethod: true,
       },
     }),
     prisma.ticket.aggregate({
@@ -771,6 +807,13 @@ export async function getCashSummary(venueId: number): Promise<CashSummaryResult
     .filter((movement) => movement.type === CashMovementType.CASH_OUT)
     .reduce((sum, movement) => sum + Number(movement.amount), 0);
   const billedTotal = Number(aggregate._sum.total ?? 0);
+  const cashSalesTotal = tickets
+    .filter((ticket) => ticket.paymentMethod === PaymentMethod.CASH)
+    .reduce((sum, ticket) => sum + Number(ticket.total), 0);
+  const cardSalesTotal = tickets
+    .filter((ticket) => ticket.paymentMethod === PaymentMethod.CARD)
+    .reduce((sum, ticket) => sum + Number(ticket.total), 0);
+  const vatTotal = tickets.reduce((sum, ticket) => sum + Number(ticket.vatAmount), 0);
   const expectedAmount = Math.round((openingAmount + billedTotal + manualInTotal - manualOutTotal) * 100) / 100;
 
   return {
@@ -791,6 +834,9 @@ export async function getCashSummary(venueId: number): Promise<CashSummaryResult
     openingAmount,
     manualInTotal,
     manualOutTotal,
+    cashSalesTotal: Math.round(cashSalesTotal * 100) / 100,
+    cardSalesTotal: Math.round(cardSalesTotal * 100) / 100,
+    vatTotal: Math.round(vatTotal * 100) / 100,
     expectedAmount,
     tickets,
     movements: movements.map((movement) => ({
@@ -895,7 +941,14 @@ export async function addCashMovement(input: {
   }
 }
 
-export async function closeCashRegister(input: { venueId: number; userId: number; countedAmount: number; notes?: string }) {
+export async function closeCashRegister(input: {
+  venueId: number;
+  userId: number;
+  countedAmount: number;
+  notes?: string;
+  printerIp?: string;
+  printerPort?: number;
+}) {
   const summary = await getCashSummary(input.venueId);
   if (!summary.activeSession) {
     throw new Error('No hay una caja abierta para cerrar');
@@ -904,8 +957,18 @@ export async function closeCashRegister(input: { venueId: number; userId: number
   const discrepancyAmount = Math.round((input.countedAmount - summary.expectedAmount) * 100) / 100;
 
   let closure;
+  let venueData: {
+    id: number;
+    name: string;
+    address: string | null;
+    organisationId: number;
+    useOrgNif: boolean;
+    nifOverride: string | null;
+    nameOverride: string | null;
+    organisation: { name: string; nif: string; address: string | null };
+  } | null = null;
   try {
-    closure = await prisma.$transaction(async (tx) => {
+    [closure, venueData] = await prisma.$transaction(async (tx) => {
       await tx.cashSession.update({
         where: { id: summary.activeSession!.id },
         data: {
@@ -919,7 +982,7 @@ export async function closeCashRegister(input: { venueId: number; userId: number
         },
       });
 
-      return tx.cashClosure.create({
+      const createdClosure = await tx.cashClosure.create({
         data: {
           venueId: input.venueId,
           userId: input.userId,
@@ -942,6 +1005,17 @@ export async function closeCashRegister(input: { venueId: number; userId: number
           },
         },
       });
+
+      const currentVenue = await tx.venue.findUnique({
+        where: { id: input.venueId },
+        include: {
+          organisation: {
+            select: { name: true, nif: true, address: true },
+          },
+        },
+      });
+
+      return [createdClosure, currentVenue] as const;
     });
   } catch (error) {
     if (isMissingCashTables(error) || isMissingCashClosuresTable(error)) {
@@ -950,5 +1024,73 @@ export async function closeCashRegister(input: { venueId: number; userId: number
     throw error;
   }
 
-  return closure;
+  if (!venueData) {
+    return closure;
+  }
+
+  const effectiveNif = venueData.useOrgNif ? venueData.organisation.nif : (venueData.nifOverride ?? venueData.organisation.nif);
+  const effectiveName = venueData.useOrgNif ? venueData.organisation.name : (venueData.nameOverride ?? venueData.organisation.name);
+  const effectiveAddress = venueData.address ?? venueData.organisation.address ?? '';
+  const logoPngBase64 = await getTicketLogoBase64(venueData.organisationId);
+
+  const printableClosure = {
+    businessName: effectiveName,
+    businessNif: effectiveNif,
+    businessAddress: effectiveAddress,
+    venueName: venueData.name,
+    openedAt: summary.activeSession.openedAt,
+    closedAt: summary.periodEnd,
+    closedByName: closure.user.name,
+    openingAmount: summary.openingAmount,
+    cashSalesTotal: summary.cashSalesTotal,
+    cardSalesTotal: summary.cardSalesTotal,
+    billedTotal: summary.billedTotal,
+    vatTotal: summary.vatTotal,
+    manualInTotal: summary.manualInTotal,
+    manualOutTotal: summary.manualOutTotal,
+    expectedAmount: summary.expectedAmount,
+    countedAmount: input.countedAmount,
+    discrepancyAmount,
+    notes: input.notes,
+    logoPngBase64,
+  };
+
+  const closureBuffer = buildCashClosureBuffer(printableClosure);
+  const closurePreview = buildCashClosurePreviewText(printableClosure);
+  let printed = false;
+
+  if (input.printerIp) {
+    await sendToPrinter({
+      connectionType: 'NETWORK',
+      ipAddress: input.printerIp,
+      port: input.printerPort ?? 9100,
+    }, closureBuffer);
+    printed = true;
+  } else {
+    const printer = await prisma.printer.findFirst({
+      where: {
+        venueId: input.venueId,
+        type: 'RECEIPT',
+        isActive: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    if (printer) {
+      await sendToPrinter({
+        connectionType: printer.connectionType,
+        ipAddress: printer.ipAddress ?? undefined,
+        port: printer.port ?? undefined,
+        systemName: printer.systemName ?? undefined,
+      }, closureBuffer);
+      printed = true;
+    }
+  }
+
+  return {
+    ...closure,
+    preview: closurePreview,
+    rawBase64: closureBuffer.toString('base64'),
+    printed,
+  };
 }
