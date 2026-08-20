@@ -5,6 +5,9 @@ exports.closePartialTicket = closePartialTicket;
 exports.getTicketPreview = getTicketPreview;
 exports.getTicketRaw = getTicketRaw;
 exports.reprintTicket = reprintTicket;
+exports.getCashClosurePreview = getCashClosurePreview;
+exports.getCashClosureRaw = getCashClosureRaw;
+exports.reprintCashClosure = reprintCashClosure;
 exports.getCashSummary = getCashSummary;
 exports.openCashSession = openCashSession;
 exports.addCashMovement = addCashMovement;
@@ -27,6 +30,55 @@ const printer_service_1 = require("../printing/printer.service");
 const config_1 = require("../../config");
 const menuSelection_1 = require("../orders/menuSelection");
 const logo_service_1 = require("../printing/logo.service");
+async function buildCashClosurePrintablePayload(closureId) {
+    const closure = await client_2.prisma.cashClosure.findUnique({
+        where: { id: closureId },
+        include: {
+            user: { select: { id: true, name: true } },
+            venue: {
+                include: {
+                    organisation: {
+                        select: { name: true, nif: true, address: true },
+                    },
+                },
+            },
+            session: {
+                select: { openedAt: true },
+            },
+        },
+    });
+    if (!closure) {
+        throw new Error('Cierre de caja no encontrado');
+    }
+    const effectiveNif = closure.venue.useOrgNif ? closure.venue.organisation.nif : (closure.venue.nifOverride ?? closure.venue.organisation.nif);
+    const effectiveName = closure.venue.useOrgNif ? closure.venue.organisation.name : (closure.venue.nameOverride ?? closure.venue.organisation.name);
+    const effectiveAddress = closure.venue.address ?? closure.venue.organisation.address ?? '';
+    const logoPngBase64 = await (0, logo_service_1.getTicketLogoBase64)(closure.venue.organisationId);
+    return {
+        closure,
+        printable: {
+            businessName: effectiveName,
+            businessNif: effectiveNif,
+            businessAddress: effectiveAddress,
+            venueName: closure.venue.name,
+            openedAt: closure.session?.openedAt ?? closure.periodStart,
+            closedAt: closure.periodEnd,
+            closedByName: closure.user.name,
+            openingAmount: Number(closure.openingAmount),
+            cashSalesTotal: Number(closure.cashSalesTotal ?? 0),
+            cardSalesTotal: Number(closure.cardSalesTotal ?? 0),
+            billedTotal: Number(closure.billedTotal),
+            vatTotal: Number(closure.vatTotal ?? 0),
+            manualInTotal: Number(closure.manualInTotal),
+            manualOutTotal: Number(closure.manualOutTotal),
+            expectedAmount: Number(closure.expectedAmount),
+            countedAmount: Number(closure.countedAmount),
+            discrepancyAmount: Number(closure.discrepancyAmount),
+            notes: closure.notes,
+            logoPngBase64,
+        },
+    };
+}
 function isMissingCashClosuresTable(error) {
     return error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2021';
 }
@@ -554,6 +606,44 @@ async function reprintTicket(ticketId) {
     }, buffer);
     return { success: true };
 }
+async function getCashClosurePreview(closureId) {
+    const { printable } = await buildCashClosurePrintablePayload(closureId);
+    const buffer = (0, printer_service_1.buildCashClosureBuffer)(printable);
+    return {
+        id: closureId,
+        preview: (0, printer_service_1.buildCashClosurePreviewText)(printable),
+        rawBase64: buffer.toString('base64'),
+    };
+}
+async function getCashClosureRaw(closureId) {
+    return getCashClosurePreview(closureId);
+}
+async function reprintCashClosure(closureId) {
+    const { closure, printable } = await buildCashClosurePrintablePayload(closureId);
+    const buffer = (0, printer_service_1.buildCashClosureBuffer)(printable);
+    const printer = await client_2.prisma.printer.findFirst({
+        where: {
+            venueId: closure.venueId,
+            type: 'RECEIPT',
+            isActive: true,
+        },
+        orderBy: { id: 'asc' },
+    });
+    if (!printer) {
+        throw new Error('No hay impresora de tickets activa en esta sede');
+    }
+    await (0, printer_service_1.sendToPrinter)({
+        connectionType: printer.connectionType,
+        ipAddress: printer.ipAddress ?? undefined,
+        port: printer.port ?? undefined,
+        systemName: printer.systemName ?? undefined,
+    }, buffer);
+    return {
+        success: true,
+        preview: (0, printer_service_1.buildCashClosurePreviewText)(printable),
+        rawBase64: buffer.toString('base64'),
+    };
+}
 async function getCashSummary(venueId) {
     let lastClosure = null;
     let activeSession = null;
@@ -775,23 +865,27 @@ async function closeCashRegister(input) {
                     closingNotes: input.notes,
                 },
             });
+            const closureData = {
+                venueId: input.venueId,
+                userId: input.userId,
+                sessionId: summary.activeSession.id,
+                periodStart: summary.periodStart,
+                periodEnd: summary.periodEnd,
+                ticketCount: summary.ticketCount,
+                billedTotal: new client_1.Prisma.Decimal(summary.billedTotal),
+                openingAmount: new client_1.Prisma.Decimal(summary.openingAmount),
+                manualInTotal: new client_1.Prisma.Decimal(summary.manualInTotal),
+                manualOutTotal: new client_1.Prisma.Decimal(summary.manualOutTotal),
+                cashSalesTotal: new client_1.Prisma.Decimal(summary.cashSalesTotal),
+                cardSalesTotal: new client_1.Prisma.Decimal(summary.cardSalesTotal),
+                vatTotal: new client_1.Prisma.Decimal(summary.vatTotal),
+                expectedAmount: new client_1.Prisma.Decimal(summary.expectedAmount),
+                countedAmount: new client_1.Prisma.Decimal(input.countedAmount),
+                discrepancyAmount: new client_1.Prisma.Decimal(discrepancyAmount),
+                notes: input.notes,
+            };
             const createdClosure = await tx.cashClosure.create({
-                data: {
-                    venueId: input.venueId,
-                    userId: input.userId,
-                    sessionId: summary.activeSession.id,
-                    periodStart: summary.periodStart,
-                    periodEnd: summary.periodEnd,
-                    ticketCount: summary.ticketCount,
-                    billedTotal: new client_1.Prisma.Decimal(summary.billedTotal),
-                    openingAmount: new client_1.Prisma.Decimal(summary.openingAmount),
-                    manualInTotal: new client_1.Prisma.Decimal(summary.manualInTotal),
-                    manualOutTotal: new client_1.Prisma.Decimal(summary.manualOutTotal),
-                    expectedAmount: new client_1.Prisma.Decimal(summary.expectedAmount),
-                    countedAmount: new client_1.Prisma.Decimal(input.countedAmount),
-                    discrepancyAmount: new client_1.Prisma.Decimal(discrepancyAmount),
-                    notes: input.notes,
-                },
+                data: closureData,
                 include: {
                     user: {
                         select: { id: true, name: true },
@@ -818,33 +912,9 @@ async function closeCashRegister(input) {
     if (!venueData) {
         return closure;
     }
-    const effectiveNif = venueData.useOrgNif ? venueData.organisation.nif : (venueData.nifOverride ?? venueData.organisation.nif);
-    const effectiveName = venueData.useOrgNif ? venueData.organisation.name : (venueData.nameOverride ?? venueData.organisation.name);
-    const effectiveAddress = venueData.address ?? venueData.organisation.address ?? '';
-    const logoPngBase64 = await (0, logo_service_1.getTicketLogoBase64)(venueData.organisationId);
-    const printableClosure = {
-        businessName: effectiveName,
-        businessNif: effectiveNif,
-        businessAddress: effectiveAddress,
-        venueName: venueData.name,
-        openedAt: summary.activeSession.openedAt,
-        closedAt: summary.periodEnd,
-        closedByName: closure.user.name,
-        openingAmount: summary.openingAmount,
-        cashSalesTotal: summary.cashSalesTotal,
-        cardSalesTotal: summary.cardSalesTotal,
-        billedTotal: summary.billedTotal,
-        vatTotal: summary.vatTotal,
-        manualInTotal: summary.manualInTotal,
-        manualOutTotal: summary.manualOutTotal,
-        expectedAmount: summary.expectedAmount,
-        countedAmount: input.countedAmount,
-        discrepancyAmount,
-        notes: input.notes,
-        logoPngBase64,
-    };
-    const closureBuffer = (0, printer_service_1.buildCashClosureBuffer)(printableClosure);
-    const closurePreview = (0, printer_service_1.buildCashClosurePreviewText)(printableClosure);
+    const { printable } = await buildCashClosurePrintablePayload(closure.id);
+    const closureBuffer = (0, printer_service_1.buildCashClosureBuffer)(printable);
+    const closurePreview = (0, printer_service_1.buildCashClosurePreviewText)(printable);
     let printed = false;
     if (input.printerIp) {
         await (0, printer_service_1.sendToPrinter)({

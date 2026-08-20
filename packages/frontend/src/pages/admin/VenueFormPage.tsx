@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { adminApi } from '../../services/api';
+import { useAppStore } from '../../store/useAppStore';
 import type { Venue } from '../../types';
 
 type VenueForm = Partial<Omit<Venue, 'id' | 'organisationId'>>;
@@ -60,6 +61,7 @@ export function VenueFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id;
   const navigate = useNavigate();
+  const { currentVenueId, setCurrentVenue } = useAppStore();
   const [form, setForm] = useState<VenueForm>(DEFAULT);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,7 +88,10 @@ export function VenueFormPage() {
     try {
       const payload = buildVenuePayload(form);
       if (isEdit) {
-        await adminApi.updateVenue(parseInt(id!, 10), payload);
+        const updatedVenue = await adminApi.updateVenue(parseInt(id!, 10), payload);
+        if (currentVenueId === updatedVenue.id) {
+          setCurrentVenue(updatedVenue);
+        }
         toast.success('Sede actualizada');
       } else {
         await adminApi.createVenue(payload);

@@ -23,6 +23,11 @@ export interface CloseTicketResult {
     total: number;
     qrBase64?: string;
 }
+export interface CashClosurePrintResult {
+    id: number;
+    preview: string;
+    rawBase64: string;
+}
 export interface CashSummaryResult {
     activeSession: {
         id: number;
@@ -204,6 +209,13 @@ export declare function getTicketRaw(ticketId: number): Promise<{
 export declare function reprintTicket(ticketId: number): Promise<{
     success: boolean;
 }>;
+export declare function getCashClosurePreview(closureId: number): Promise<CashClosurePrintResult>;
+export declare function getCashClosureRaw(closureId: number): Promise<CashClosurePrintResult>;
+export declare function reprintCashClosure(closureId: number): Promise<{
+    success: boolean;
+    preview: string;
+    rawBase64: string;
+}>;
 export declare function getCashSummary(venueId: number): Promise<CashSummaryResult>;
 export declare function openCashSession(input: {
     venueId: number;
@@ -228,10 +240,10 @@ export declare function addCashMovement(input: {
     userId: number;
     venueId: number;
     type: import(".prisma/client").$Enums.CashMovementType;
+    sessionId: number;
     amount: Prisma.Decimal;
     description: string | null;
     ticketId: number | null;
-    sessionId: number;
 }>;
 export declare function closeCashRegister(input: {
     venueId: number;
@@ -251,17 +263,20 @@ export declare function closeCashRegister(input: {
     userId: number;
     venueId: number;
     notes: string | null;
-    openingAmount: Prisma.Decimal;
-    expectedAmount: Prisma.Decimal;
-    countedAmount: Prisma.Decimal;
-    discrepancyAmount: Prisma.Decimal;
     sessionId: number | null;
     periodStart: Date;
     periodEnd: Date;
     ticketCount: number;
     billedTotal: Prisma.Decimal;
+    openingAmount: Prisma.Decimal;
     manualInTotal: Prisma.Decimal;
     manualOutTotal: Prisma.Decimal;
+    cashSalesTotal: Prisma.Decimal;
+    cardSalesTotal: Prisma.Decimal;
+    vatTotal: Prisma.Decimal;
+    expectedAmount: Prisma.Decimal;
+    countedAmount: Prisma.Decimal;
+    discrepancyAmount: Prisma.Decimal;
 }) | {
     preview: string;
     rawBase64: string;
@@ -275,16 +290,19 @@ export declare function closeCashRegister(input: {
     userId: number;
     venueId: number;
     notes: string | null;
-    openingAmount: Prisma.Decimal;
-    expectedAmount: Prisma.Decimal;
-    countedAmount: Prisma.Decimal;
-    discrepancyAmount: Prisma.Decimal;
     sessionId: number | null;
     periodStart: Date;
     periodEnd: Date;
     ticketCount: number;
     billedTotal: Prisma.Decimal;
+    openingAmount: Prisma.Decimal;
     manualInTotal: Prisma.Decimal;
     manualOutTotal: Prisma.Decimal;
+    cashSalesTotal: Prisma.Decimal;
+    cardSalesTotal: Prisma.Decimal;
+    vatTotal: Prisma.Decimal;
+    expectedAmount: Prisma.Decimal;
+    countedAmount: Prisma.Decimal;
+    discrepancyAmount: Prisma.Decimal;
 }>;
 //# sourceMappingURL=tickets.service.d.ts.map

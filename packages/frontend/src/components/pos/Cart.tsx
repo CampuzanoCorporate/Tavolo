@@ -49,6 +49,7 @@ export function Cart({
 
   const sentItems = summary.items.filter((i) => i.sent);
   const pendingItems = summary.items.filter((i) => !i.sent);
+  const chargeableItems = kitchenEnabled ? sentItems : summary.items;
 
   return (
     <>
@@ -307,14 +308,14 @@ export function Cart({
               id="btn-request-bill"
               className="btn btn-secondary btn-full btn-lg"
               onClick={onRequestBill}
-              disabled={sentItems.length === 0}
+              disabled={chargeableItems.length === 0}
               style={{ fontWeight: 700 }}
             >
               Emitir pre-ticket
             </button>
           ) : (
             <div style={{ display: 'flex', gap: 'var(--space-2)', width: '100%' }}>
-              {sentItems.length > 0 && onSplitBill && (
+              {chargeableItems.length > 0 && onSplitBill && (
                 <button
                   id="btn-split-bill"
                   className="btn btn-secondary btn-lg"

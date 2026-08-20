@@ -13,7 +13,8 @@ interface TicketListItem {
   invoiceSeries: string;
   invoiceNumber: number;
   invoiceCode: string;
-  invoiceDate: string;
+  invoiceDate?: string;
+  issuedAt?: string;
   total: number;
   vatTotal: number;
   vatAmount?: number | string | null;
@@ -50,6 +51,12 @@ export function TicketsLogPage() {
   const parseAmount = (value: number | string | null | undefined) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return 'Sin fecha';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Sin fecha' : date.toLocaleString('es-ES');
   };
 
   const loadTickets = async () => {
@@ -124,7 +131,44 @@ export function TicketsLogPage() {
       }
     } catch (error) {
       console.error('[Tickets] Error reimprimiendo ticket:', error);
-      toast.error('No se pudo reimprimir el ticket');
+      if (selectedLocalPrinterName) {
+        try {
+          await ticketsApi.reprint(ticketId);
+          toast.success('Ticket enviado a la impresora del servidor');
+        } catch {
+          toast.error('No se pudo reimprimir el ticket');
+        }
+      } else {
+        toast.error('No se pudo reimprimir el ticket');
+      }
+    } finally {
+      setReprintingTicketId(null);
+    }
+  };
+
+  const handleReprintClosure = async (closureId: number) => {
+    try {
+      setReprintingTicketId(closureId);
+      if (selectedLocalPrinterName) {
+        const rawClosure = await ticketsApi.getCashClosureRaw(closureId);
+        await printRawBase64WithQzTray(selectedLocalPrinterName, rawClosure.rawBase64);
+        toast.success(`Cierre enviado a la impresora local "${selectedLocalPrinterName}"`);
+      } else {
+        await ticketsApi.reprintCashClosure(closureId);
+        toast.success('Cierre enviado a impresión');
+      }
+    } catch (error) {
+      console.error('[Tickets] Error reimprimiendo cierre:', error);
+      if (selectedLocalPrinterName) {
+        try {
+          await ticketsApi.reprintCashClosure(closureId);
+          toast.success('Cierre enviado a la impresora del servidor');
+        } catch {
+          toast.error('No se pudo reimprimir el cierre');
+        }
+      } else {
+        toast.error('No se pudo reimprimir el cierre');
+      }
     } finally {
       setReprintingTicketId(null);
     }
@@ -225,7 +269,7 @@ export function TicketsLogPage() {
                         <code className="admin-code">{t.invoiceCode}</code>
                       </td>
                       <td style={{ fontSize: '0.82rem' }}>
-                        {new Date(t.invoiceDate).toLocaleString('es-ES')}
+                        {formatDateTime(t.issuedAt ?? t.invoiceDate)}
                       </td>
                       <td>
                         <div style={{ fontSize: '0.8rem' }}>{t.businessName}</div>
@@ -301,23 +345,24 @@ export function TicketsLogPage() {
                 <th>Contado</th>
                 <th>Descuadre</th>
                 <th>Notas</th>
+                <th style={{ textAlign: 'right' }}>Acción</th>
               </tr>
             </thead>
             <tbody>
               {closures.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)' }}>
                     No hay cierres registrados todavía.
                   </td>
                 </tr>
               ) : (
                 closures.map((closure) => (
                   <tr key={closure.id}>
-                    <td>{new Date(closure.createdAt).toLocaleString('es-ES')}</td>
+                    <td>{formatDateTime(closure.createdAt)}</td>
                     <td style={{ fontSize: '0.8rem' }}>
-                      {new Date(closure.periodStart).toLocaleString('es-ES')}
+                      {formatDateTime(closure.periodStart)}
                       <br />
-                      {new Date(closure.periodEnd).toLocaleString('es-ES')}
+                      {formatDateTime(closure.periodEnd)}
                     </td>
                     <td>{closure.user.name}</td>
                     <td style={{ fontWeight: 700 }}>
@@ -338,6 +383,15 @@ export function TicketsLogPage() {
                     </td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
                       {closure.notes || 'Sin notas'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => void handleReprintClosure(closure.id)}
+                        disabled={reprintingTicketId === closure.id}
+                      >
+                        {reprintingTicketId === closure.id ? 'Imprimiendo...' : 'Reimprimir'}
+                      </button>
                     </td>
                   </tr>
                 ))

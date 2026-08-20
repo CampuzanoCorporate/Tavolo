@@ -127,6 +127,24 @@ async function ticketsRoutes(fastify) {
         });
         return reply.status(201).send({ data: closure });
     });
+    fastify.get('/cash-closures/:id/preview', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'VIEW_FINANCIALS'))
+            return;
+        const data = await (0, tickets_service_1.getCashClosurePreview)(parseInt(request.params.id, 10));
+        return reply.send({ data });
+    });
+    fastify.get('/cash-closures/:id/raw', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'VIEW_FINANCIALS'))
+            return;
+        const data = await (0, tickets_service_1.getCashClosureRaw)(parseInt(request.params.id, 10));
+        return reply.send({ data });
+    });
+    fastify.post('/cash-closures/:id/reprint', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'CLOSE_CASH'))
+            return;
+        const data = await (0, tickets_service_1.reprintCashClosure)(parseInt(request.params.id, 10));
+        return reply.send({ data });
+    });
     /** GET /api/tickets/:id/preview */
     fastify.get('/:id/preview', async (request, reply) => {
         const data = await (0, tickets_service_1.getTicketPreview)(parseInt(request.params.id, 10));

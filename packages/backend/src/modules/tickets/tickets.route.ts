@@ -4,7 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { addCashMovement, closeCashRegister, closeTicket, getCashSummary, getTicketPreview, getTicketRaw, openCashSession, reprintTicket, closePartialTicket } from './tickets.service';
+import { addCashMovement, closeCashRegister, closePartialTicket, closeTicket, getCashClosurePreview, getCashClosureRaw, getCashSummary, getTicketPreview, getTicketRaw, openCashSession, reprintCashClosure, reprintTicket } from './tickets.service';
 import { canAccessVenue, requirePermission } from '../auth/guards';
 
 const CloseTicketSchema = z.object({
@@ -134,6 +134,24 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
       printerPort: body.printerPort,
     });
     return reply.status(201).send({ data: closure });
+  });
+
+  fastify.get<{ Params: { id: string } }>('/cash-closures/:id/preview', async (request, reply) => {
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
+    const data = await getCashClosurePreview(parseInt(request.params.id, 10));
+    return reply.send({ data });
+  });
+
+  fastify.get<{ Params: { id: string } }>('/cash-closures/:id/raw', async (request, reply) => {
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
+    const data = await getCashClosureRaw(parseInt(request.params.id, 10));
+    return reply.send({ data });
+  });
+
+  fastify.post<{ Params: { id: string } }>('/cash-closures/:id/reprint', async (request, reply) => {
+    if (!requirePermission(request, reply, 'CLOSE_CASH')) return;
+    const data = await reprintCashClosure(parseInt(request.params.id, 10));
+    return reply.send({ data });
   });
 
   /** GET /api/tickets/:id/preview */
