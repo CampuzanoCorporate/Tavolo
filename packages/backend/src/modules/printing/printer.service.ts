@@ -277,6 +277,26 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 42) => text(char.repeat(length));
+  const wrapText = (value: string, lineLength: number) => {
+    const cleaned = value.trim().replace(/\s+/g, ' ');
+    if (!cleaned) return [];
+    const words = cleaned.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= lineLength) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+
+    if (current) lines.push(current);
+    return lines;
+  };
 
   // ── Inicializar impresora
   parts.push(ESCPOS.INIT);
@@ -294,10 +314,13 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   // ── Cabecera: nombre del negocio
   parts.push(ESCPOS.ALIGN_CENTER);
   parts.push(ESCPOS.BOLD_ON, ESCPOS.DOUBLE_SIZE_ON);
-  parts.push(text(data.businessName.toUpperCase().substring(0, 20)));
-  parts.push(nl);
+  for (const businessLine of wrapText(data.businessName.toUpperCase(), 20).slice(0, 3)) {
+    parts.push(text(businessLine), nl);
+  }
   parts.push(ESCPOS.DOUBLE_SIZE_OFF, ESCPOS.BOLD_OFF);
-  parts.push(text(data.businessAddress), nl);
+  for (const addressLine of wrapText(data.businessAddress, 42).slice(0, 3)) {
+    parts.push(text(addressLine), nl);
+  }
   parts.push(text(`NIF: ${data.businessNif}`), nl);
   parts.push(nl);
   parts.push(line(), nl);
@@ -314,18 +337,28 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
 
   // ── Líneas de producto
   parts.push(ESCPOS.BOLD_ON);
-  parts.push(text('Descripcion            Cant   Precio'), nl);
+  parts.push(text('Descripcion'), nl);
+  parts.push(text('Cant x P.Unit.              Total'), nl);
   parts.push(ESCPOS.BOLD_OFF);
   parts.push(line(), nl);
 
   for (const item of data.items) {
-    const name = item.name.substring(0, 22).padEnd(22, ' ');
-    const qty = String(item.quantity).padStart(4, ' ');
-    const price = (item.quantity * item.unitPrice).toFixed(2).padStart(8, ' ');
-    parts.push(text(`${name}${qty}  ${price}EUR`), nl);
+    const totalLine = item.quantity * item.unitPrice;
+    const itemNameLines = wrapText(item.name, 42);
+    for (const itemNameLine of itemNameLines) {
+      parts.push(text(itemNameLine), nl);
+    }
+
+    const qtyUnit = `${item.quantity} x ${item.unitPrice.toFixed(2)}`
+      .replace('.', ',')
+      .padEnd(24, ' ');
+    const totalText = `${totalLine.toFixed(2).replace('.', ',')} EUR`.padStart(18, ' ');
+    parts.push(text(`${qtyUnit}${totalText}`), nl);
 
     if (item.notes) {
-      parts.push(text(`  >> ${item.notes.substring(0, 35)}`), nl);
+      for (const noteLine of wrapText(`>> ${item.notes}`, 40)) {
+        parts.push(text(noteLine), nl);
+      }
     }
   }
 
@@ -375,24 +408,26 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
 
   const lines = [
     ...(data.logoPngBase64 ? ['[Logo del negocio]'] : []),
-    data.businessName.toUpperCase(),
-    data.businessAddress,
+    ...wrapPreviewText(data.businessName.toUpperCase(), 20),
+    ...wrapPreviewText(data.businessAddress, 42),
     `NIF: ${data.businessNif}`,
     '------------------------------------------',
     `Factura: ${data.invoiceCode}`,
     `Fecha:   ${fechaStr}`,
     `Mesa:    ${data.tableNumber}   Camarero: ${data.waiterName}`,
     '------------------------------------------',
-    'Descripcion            Cant   Precio',
+    'Descripcion',
+    'Cant x P.Unit.              Total',
     '------------------------------------------',
   ];
 
   for (const item of data.items) {
-    const name = item.name.substring(0, 22).padEnd(22, ' ');
-    const qty = String(item.quantity).padStart(4, ' ');
-    const price = (item.quantity * item.unitPrice).toFixed(2).padStart(8, ' ');
-    lines.push(`${name}${qty}  ${price}EUR`);
-    if (item.notes) lines.push(`  >> ${item.notes.substring(0, 35)}`);
+    const totalLine = item.quantity * item.unitPrice;
+    lines.push(...wrapPreviewText(item.name, 42));
+    const qtyUnit = `${item.quantity} x ${item.unitPrice.toFixed(2).replace('.', ',')}`.padEnd(24, ' ');
+    const totalText = `${totalLine.toFixed(2).replace('.', ',')} EUR`.padStart(18, ' ');
+    lines.push(`${qtyUnit}${totalText}`);
+    if (item.notes) lines.push(...wrapPreviewText(`>> ${item.notes}`, 40));
   }
 
   lines.push('------------------------------------------');
@@ -406,6 +441,27 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
   lines.push('Gracias por su visita');
 
   return lines.join('\n');
+}
+
+function wrapPreviewText(value: string, lineLength: number) {
+  const cleaned = value.trim().replace(/\s+/g, ' ');
+  if (!cleaned) return [];
+  const words = cleaned.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= lineLength) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines;
 }
 
 export function buildCashClosureBuffer(data: PrintCashClosureData): Buffer {
