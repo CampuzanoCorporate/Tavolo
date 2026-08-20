@@ -44,6 +44,20 @@ export function PaymentModal({
 
   const deliveredNum = parseFloat(delivered) || 0;
 
+  useEffect(() => {
+    if (method === 'CASH') {
+      setDelivered((prev) => {
+        if (!prev || Number.parseFloat(prev) < total) {
+          return total.toFixed(2);
+        }
+        return prev;
+      });
+      return;
+    }
+
+    setDelivered('');
+  }, [method, total]);
+
   // Calcular el cambio a devolver
   useEffect(() => {
     if (method === 'CASH' && deliveredNum >= total) {

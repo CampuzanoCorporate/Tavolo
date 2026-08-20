@@ -22,7 +22,7 @@ import { FiscalAdminPage } from './pages/admin/FiscalAdminPage';
 import { LicensingPage } from './pages/admin/LicensingPage';
 import { useAppStore } from './store/useAppStore';
 import { countPendingOrders } from './services/offlineStorage';
-import { licensingApi } from './services/api';
+import { adminApi, licensingApi } from './services/api';
 
 // ── PROTECCIÓN DE RUTAS ──────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 // ── NAVBAR PRINCIPAL ─────────────────────────────────────────────────────────
 
 function Navbar() {
-  const { setIsOnline, pendingOrdersCount, setPendingOrdersCount, currentUser, currentVenue, logout, licenseStatus, setLicenseStatus } = useAppStore();
+  const { setIsOnline, pendingOrdersCount, setPendingOrdersCount, currentUser, currentVenue, currentVenueId, setCurrentVenue, logout, licenseStatus, setLicenseStatus } = useAppStore();
   const location = useLocation();
   const isPOS = location.pathname.startsWith('/pos/');
   const isAdmin = location.pathname.startsWith('/admin');
@@ -99,6 +99,16 @@ function Navbar() {
     const interval = setInterval(update, 60_000);
     return () => clearInterval(interval);
   }, [currentUser, setLicenseStatus]);
+
+  useEffect(() => {
+    if (!currentUser || !currentVenueId) return;
+
+    adminApi.getVenue(currentVenueId)
+      .then((venue) => setCurrentVenue(venue))
+      .catch(() => {
+        // Si falla, mantenemos la sede cacheada sin interrumpir navegación.
+      });
+  }, [currentUser, currentVenueId, setCurrentVenue]);
 
   // No renderizar Navbar en Login o Selector de sede
   if (location.pathname === '/login' || location.pathname === '/select-venue') {
