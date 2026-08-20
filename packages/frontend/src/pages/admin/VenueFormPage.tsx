@@ -39,10 +39,11 @@ function buildVenuePayload(form: VenueForm): VenueForm {
   const trimmedNifOverride = form.nifOverride?.trim() ?? '';
   const trimmedNameOverride = form.nameOverride?.trim() ?? '';
   const trimmedInvoiceSeries = form.invoiceSeries?.trim().toUpperCase() ?? 'T';
+  const normalizedSlug = slugify(trimmedSlug);
 
   return {
     name: trimmedName,
-    slug: trimmedSlug,
+    slug: normalizedSlug,
     address: trimmedAddress || undefined,
     phone: trimmedPhone || undefined,
     timezone: form.timezone ?? 'Europe/Madrid',
