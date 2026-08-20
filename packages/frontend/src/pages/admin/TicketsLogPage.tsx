@@ -22,7 +22,8 @@ interface TicketListItem {
   businessNif: string;
   businessAddress: string;
   hashSelf: string;
-  hashPrev: string | null;
+  hashPrev?: string | null;
+  hashPrevious?: string | null;
   signature: string | null;
   qrBase64: string | null;
   aeatStatus: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'ERROR';
@@ -465,7 +466,7 @@ export function TicketsLogPage() {
                   <div>
                     <strong>Huella Anterior (hashPrev):</strong>
                     <div style={{ overflowX: 'auto', background: 'var(--color-surface-3)', padding: 6, borderRadius: 4, border: '1px solid var(--color-border)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                      {selectedTicket.hashPrev ?? 'PRIMERA FACTURA DE LA SERIE'}
+                      {selectedTicket.hashPrevious ?? selectedTicket.hashPrev ?? 'PRIMERA FACTURA DE LA SERIE'}
                     </div>
                   </div>
                 </div>
