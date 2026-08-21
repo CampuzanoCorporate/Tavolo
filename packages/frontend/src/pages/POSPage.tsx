@@ -326,6 +326,14 @@ export function POSPage() {
     return true;
   }, [selectedLocalPrinterName]);
 
+  const handleLocalPreBillPrint = useCallback(async (tableIdToPrint: number) => {
+    if (!selectedLocalPrinterName) return false;
+
+    const rawPreBill = await ticketsApi.getPreBillRaw(tableIdToPrint);
+    await printRawBase64WithQzTray(selectedLocalPrinterName, rawPreBill.rawBase64);
+    return true;
+  }, [selectedLocalPrinterName]);
+
   // ── Añadir producto al carrito ───────────────────────────────────────────
   const addConfiguredProductToCart = async (product: Product, payload?: { price?: number; notes?: string; displayNotes?: string; modifierSummary?: string }) => {
     addToCart({
@@ -591,6 +599,20 @@ export function POSPage() {
       const updatedTable = await tablesApi.requestBill(activeTable.id);
       setActiveTable(updatedTable);
       setTables(tables.map((t) => (t.id === updatedTable.id ? updatedTable : t)));
+      try {
+        if (selectedLocalPrinterName) {
+          await handleLocalPreBillPrint(activeTable.id);
+        } else if (selectedPrinterIp) {
+          await ticketsApi.reprintPreBill(activeTable.id);
+        } else {
+          toast('Pre-ticket emitido sin impresión automática. Configura una impresora local o una impresora de servidor.', {
+            icon: '🖨️',
+          });
+        }
+      } catch (printError) {
+        console.error('[POS] Error imprimiendo pre-ticket:', printError);
+        toast.error('El pre-ticket se ha marcado en la mesa, pero no se pudo imprimir');
+      }
       toast.success('Pre-ticket emitido. Mesa en estado Cuenta.');
     } catch (error) {
       console.error('[POS] Error al emitir pre-ticket:', error);

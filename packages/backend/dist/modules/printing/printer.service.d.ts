@@ -72,6 +72,14 @@ export interface PrintTicketData {
     logoPngBase64?: string | null;
     /** QR de cotejo Veri*factu (Base64 PNG) — opcional */
     qrBase64?: string;
+    /** Título del documento, por ejemplo PRE-TICKET */
+    documentTitle?: string;
+    /** Etiqueta para el código del documento */
+    documentCodeLabel?: string;
+    /** Indica si se debe imprimir el bloque fiscal */
+    showFiscalInfo?: boolean;
+    /** Mensaje final */
+    footerMessage?: string;
 }
 export interface PrintCommandaData {
     tableNumber: number;

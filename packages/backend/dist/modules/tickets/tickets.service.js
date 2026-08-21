@@ -5,6 +5,8 @@ exports.closePartialTicket = closePartialTicket;
 exports.getTicketPreview = getTicketPreview;
 exports.getTicketRaw = getTicketRaw;
 exports.reprintTicket = reprintTicket;
+exports.getPreBillRaw = getPreBillRaw;
+exports.printPreBill = printPreBill;
 exports.getCashClosurePreview = getCashClosurePreview;
 exports.getCashClosureRaw = getCashClosureRaw;
 exports.reprintCashClosure = reprintCashClosure;
@@ -107,6 +109,79 @@ function buildPrintableTicketPayload(ticket, order) {
         total: parseFloat(ticket.total.toString()),
         logoPngBase64: ticket.logoPngBase64 ?? undefined,
         qrBase64: ticket.qrBase64 ?? undefined,
+    };
+}
+async function buildPreBillPrintablePayload(tableId) {
+    const table = await client_2.prisma.table.findUnique({
+        where: { id: tableId },
+        include: {
+            venue: {
+                include: {
+                    organisation: {
+                        select: { name: true, nif: true, address: true },
+                    },
+                },
+            },
+        },
+    });
+    if (!table) {
+        throw new Error('Mesa no encontrada');
+    }
+    const order = await client_2.prisma.order.findFirst({
+        where: {
+            tableId,
+            venueId: table.venueId,
+            status: { in: [client_1.OrderStatus.OPEN, client_1.OrderStatus.SENT_TO_KITCHEN, client_1.OrderStatus.READY] },
+        },
+        include: {
+            items: {
+                include: { product: true },
+            },
+            user: true,
+        },
+        orderBy: { createdAt: 'desc' },
+    });
+    if (!order || order.items.length === 0) {
+        throw new Error('No hay una comanda activa para emitir el pre-ticket');
+    }
+    const effectiveNif = table.venue.useOrgNif ? table.venue.organisation.nif : (table.venue.nifOverride ?? table.venue.organisation.nif);
+    const effectiveName = table.venue.useOrgNif ? table.venue.organisation.name : (table.venue.nameOverride ?? table.venue.organisation.name);
+    const effectiveAddress = table.venue.address ?? table.venue.organisation.address ?? '';
+    const logoPngBase64 = await (0, logo_service_1.getTicketLogoBase64)(table.venue.organisationId);
+    const subtotal = order.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity / (1 + Number(item.vatRate) / 100), 0);
+    const total = order.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0);
+    const vatAmount = total - subtotal;
+    const dominantVatRate = Number(order.items[0]?.vatRate ?? 10);
+    const now = new Date();
+    const preBillCode = `PRE-${table.venue.invoiceSeries}-${table.number}-${order.id}`;
+    const printable = {
+        businessName: effectiveName,
+        businessNif: effectiveNif,
+        businessAddress: effectiveAddress,
+        invoiceCode: preBillCode,
+        issuedAt: now,
+        tableNumber: table.number,
+        waiterName: order.user.name,
+        items: order.items.map((item) => ({
+            name: item.product.name,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            notes: (0, menuSelection_1.getVisibleNotes)(item.notes),
+        })),
+        subtotal,
+        vatAmount,
+        vatRate: dominantVatRate,
+        total,
+        logoPngBase64,
+        documentTitle: 'PRE-TICKET',
+        documentCodeLabel: 'Referencia',
+        showFiscalInfo: false,
+        footerMessage: 'Importe informativo pendiente de cobro',
+    };
+    return {
+        table,
+        order,
+        printable,
     };
 }
 async function buildStoredTicketQrBase64(params) {
@@ -605,6 +680,42 @@ async function reprintTicket(ticketId) {
         systemName: printer.systemName ?? undefined,
     }, buffer);
     return { success: true };
+}
+async function getPreBillRaw(tableId) {
+    const { order, printable } = await buildPreBillPrintablePayload(tableId);
+    const buffer = (0, printer_service_1.buildTicketBuffer)(printable);
+    return {
+        tableId,
+        orderId: order.id,
+        preview: (0, printer_service_1.buildTicketPreviewText)(printable),
+        rawBase64: buffer.toString('base64'),
+    };
+}
+async function printPreBill(tableId) {
+    const { table, printable } = await buildPreBillPrintablePayload(tableId);
+    const buffer = (0, printer_service_1.buildTicketBuffer)(printable);
+    const printer = await client_2.prisma.printer.findFirst({
+        where: {
+            venueId: table.venueId,
+            type: 'RECEIPT',
+            isActive: true,
+        },
+        orderBy: { id: 'asc' },
+    });
+    if (!printer) {
+        throw new Error('No hay impresora de tickets activa en esta sede');
+    }
+    await (0, printer_service_1.sendToPrinter)({
+        connectionType: printer.connectionType,
+        ipAddress: printer.ipAddress ?? undefined,
+        port: printer.port ?? undefined,
+        systemName: printer.systemName ?? undefined,
+    }, buffer);
+    return {
+        success: true,
+        preview: (0, printer_service_1.buildTicketPreviewText)(printable),
+        rawBase64: buffer.toString('base64'),
+    };
 }
 async function getCashClosurePreview(closureId) {
     const { printable } = await buildCashClosurePrintablePayload(closureId);

@@ -4,7 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { addCashMovement, closeCashRegister, closePartialTicket, closeTicket, getCashClosurePreview, getCashClosureRaw, getCashSummary, getTicketPreview, getTicketRaw, openCashSession, reprintCashClosure, reprintTicket } from './tickets.service';
+import { addCashMovement, closeCashRegister, closePartialTicket, closeTicket, getCashClosurePreview, getCashClosureRaw, getCashSummary, getPreBillRaw, getTicketPreview, getTicketRaw, openCashSession, printPreBill, reprintCashClosure, reprintTicket } from './tickets.service';
 import { canAccessVenue, requirePermission } from '../auth/guards';
 
 const CloseTicketSchema = z.object({
@@ -151,6 +151,34 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
   fastify.post<{ Params: { id: string } }>('/cash-closures/:id/reprint', async (request, reply) => {
     if (!requirePermission(request, reply, 'CLOSE_CASH')) return;
     const data = await reprintCashClosure(parseInt(request.params.id, 10));
+    return reply.send({ data });
+  });
+
+  fastify.get<{ Params: { tableId: string } }>('/prebills/:tableId/raw', async (request, reply) => {
+    const tableId = parseInt(request.params.tableId, 10);
+    const table = await prisma.table.findUnique({
+      where: { id: tableId },
+      select: { venueId: true },
+    });
+
+    if (!table) return reply.status(404).send({ error: 'Mesa no encontrada' });
+    if (!canAccessVenue(request, table.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+
+    const data = await getPreBillRaw(tableId);
+    return reply.send({ data });
+  });
+
+  fastify.post<{ Params: { tableId: string } }>('/prebills/:tableId/reprint', async (request, reply) => {
+    const tableId = parseInt(request.params.tableId, 10);
+    const table = await prisma.table.findUnique({
+      where: { id: tableId },
+      select: { venueId: true },
+    });
+
+    if (!table) return reply.status(404).send({ error: 'Mesa no encontrada' });
+    if (!canAccessVenue(request, table.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+
+    const data = await printPreBill(tableId);
     return reply.send({ data });
   });
 

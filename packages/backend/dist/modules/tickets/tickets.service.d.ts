@@ -28,6 +28,12 @@ export interface CashClosurePrintResult {
     preview: string;
     rawBase64: string;
 }
+export interface PreBillPrintResult {
+    tableId: number;
+    orderId: number;
+    preview: string;
+    rawBase64: string;
+}
 export interface CashSummaryResult {
     activeSession: {
         id: number;
@@ -209,6 +215,12 @@ export declare function getTicketRaw(ticketId: number): Promise<{
 export declare function reprintTicket(ticketId: number): Promise<{
     success: boolean;
 }>;
+export declare function getPreBillRaw(tableId: number): Promise<PreBillPrintResult>;
+export declare function printPreBill(tableId: number): Promise<{
+    success: boolean;
+    preview: string;
+    rawBase64: string;
+}>;
 export declare function getCashClosurePreview(closureId: number): Promise<CashClosurePrintResult>;
 export declare function getCashClosureRaw(closureId: number): Promise<CashClosurePrintResult>;
 export declare function reprintCashClosure(closureId: number): Promise<{
@@ -241,8 +253,8 @@ export declare function addCashMovement(input: {
     venueId: number;
     type: import(".prisma/client").$Enums.CashMovementType;
     sessionId: number;
-    amount: Prisma.Decimal;
     description: string | null;
+    amount: Prisma.Decimal;
     ticketId: number | null;
 }>;
 export declare function closeCashRegister(input: {

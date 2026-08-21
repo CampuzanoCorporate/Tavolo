@@ -119,6 +119,14 @@ export interface PrintTicketData {
   logoPngBase64?: string | null;
   /** QR de cotejo Veri*factu (Base64 PNG) — opcional */
   qrBase64?: string;
+  /** Título del documento, por ejemplo PRE-TICKET */
+  documentTitle?: string;
+  /** Etiqueta para el código del documento */
+  documentCodeLabel?: string;
+  /** Indica si se debe imprimir el bloque fiscal */
+  showFiscalInfo?: boolean;
+  /** Mensaje final */
+  footerMessage?: string;
 }
 
 export interface PrintCommandaData {
@@ -277,6 +285,10 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   const text = (str: string) => Buffer.from(normalizeText(str), 'latin1');
   const nl = ESCPOS.NEWLINE;
   const line = (char = '-', length = 42) => text(char.repeat(length));
+  const documentTitle = data.documentTitle?.trim() || null;
+  const documentCodeLabel = data.documentCodeLabel?.trim() || 'Factura';
+  const showFiscalInfo = data.showFiscalInfo ?? true;
+  const footerMessage = data.footerMessage?.trim() || 'Gracias por su visita';
   const wrapText = (value: string, lineLength: number) => {
     const cleaned = value.trim().replace(/\s+/g, ' ');
     if (!cleaned) return [];
@@ -330,7 +342,12 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   const fecha = data.issuedAt;
   const pad = (n: number) => String(n).padStart(2, '0');
   const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth() + 1)}/${fecha.getFullYear()} ${pad(fecha.getHours())}:${pad(fecha.getMinutes())}`;
-  parts.push(text(`Factura: ${data.invoiceCode}`), nl);
+  if (documentTitle) {
+    parts.push(ESCPOS.ALIGN_CENTER, ESCPOS.BOLD_ON, text(documentTitle), nl, ESCPOS.BOLD_OFF);
+    parts.push(line(), nl);
+    parts.push(ESCPOS.ALIGN_LEFT);
+  }
+  parts.push(text(`${documentCodeLabel}: ${data.invoiceCode}`), nl);
   parts.push(text(`Fecha:   ${fechaStr}`), nl);
   parts.push(text(`Mesa:    ${data.tableNumber}   Camarero: ${data.waiterName}`), nl);
   parts.push(line(), nl);
@@ -374,25 +391,30 @@ export function buildTicketBuffer(data: PrintTicketData): Buffer {
   parts.push(ESCPOS.DOUBLE_SIZE_OFF, ESCPOS.BOLD_OFF);
   parts.push(nl);
 
-  // ── Pie: Veri*factu y mensaje
+  // ── Pie
   parts.push(ESCPOS.ALIGN_CENTER);
   parts.push(line('='), nl);
-  parts.push(text('Factura verificable en sede.agenciatributaria.gob.es'), nl);
-  parts.push(text('Veri*factu RD 1007/2023'), nl);
-  parts.push(nl);
+  if (showFiscalInfo) {
+    parts.push(text('Factura verificable en sede.agenciatributaria.gob.es'), nl);
+    parts.push(text('Veri*factu RD 1007/2023'), nl);
+    parts.push(nl);
 
-  if (data.qrBase64) {
-    const qrBuffer = buildEscPosImageBuffer(data.qrBase64);
-    if (qrBuffer) {
-      parts.push(ESCPOS.ALIGN_CENTER);
-      parts.push(qrBuffer);
-      parts.push(nl);
-      parts.push(text(`QR: ${data.invoiceCode}`), nl);
-      parts.push(nl);
+    if (data.qrBase64) {
+      const qrBuffer = buildEscPosImageBuffer(data.qrBase64);
+      if (qrBuffer) {
+        parts.push(ESCPOS.ALIGN_CENTER);
+        parts.push(qrBuffer);
+        parts.push(nl);
+        parts.push(text(`QR: ${data.invoiceCode}`), nl);
+        parts.push(nl);
+      }
     }
+  } else {
+    parts.push(text('Documento no fiscal - uso interno'), nl);
+    parts.push(nl);
   }
 
-  parts.push(text('Gracias por su visita'), nl);
+  parts.push(text(footerMessage), nl);
   parts.push(nl, nl, nl);
 
   // ── Corte de papel
@@ -405,6 +427,10 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const fecha = data.issuedAt;
   const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth() + 1)}/${fecha.getFullYear()} ${pad(fecha.getHours())}:${pad(fecha.getMinutes())}`;
+  const documentTitle = data.documentTitle?.trim() || null;
+  const documentCodeLabel = data.documentCodeLabel?.trim() || 'Factura';
+  const showFiscalInfo = data.showFiscalInfo ?? true;
+  const footerMessage = data.footerMessage?.trim() || 'Gracias por su visita';
 
   const lines = [
     ...(data.logoPngBase64 ? ['[Logo del negocio]'] : []),
@@ -412,7 +438,8 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
     ...wrapPreviewText(data.businessAddress, 42),
     `NIF: ${data.businessNif}`,
     '------------------------------------------',
-    `Factura: ${data.invoiceCode}`,
+    ...(documentTitle ? [documentTitle, '------------------------------------------'] : []),
+    `${documentCodeLabel}: ${data.invoiceCode}`,
     `Fecha:   ${fechaStr}`,
     `Mesa:    ${data.tableNumber}   Camarero: ${data.waiterName}`,
     '------------------------------------------',
@@ -435,10 +462,16 @@ export function buildTicketPreviewText(data: PrintTicketData): string {
   lines.push(`IVA (${data.vatRate}%): ${data.vatAmount.toFixed(2)} EUR`);
   lines.push(`TOTAL: ${data.total.toFixed(2)} EUR`);
   lines.push('==========================================');
-  if (data.qrBase64) {
-    lines.push('[QR Veri*factu]');
+  if (showFiscalInfo) {
+    if (data.qrBase64) {
+      lines.push('[QR Veri*factu]');
+    }
+    lines.push('Factura verificable en sede.agenciatributaria.gob.es');
+    lines.push('Veri*factu RD 1007/2023');
+  } else {
+    lines.push('Documento no fiscal - uso interno');
   }
-  lines.push('Gracias por su visita');
+  lines.push(footerMessage);
 
   return lines.join('\n');
 }

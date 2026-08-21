@@ -58,6 +58,13 @@ export interface TicketLogoSummary {
   updatedAt: string;
 }
 
+export interface PreBillRawData {
+  tableId: number;
+  orderId: number;
+  preview: string;
+  rawBase64: string;
+}
+
 export interface Venue {
   id: number;
   organisationId: number;

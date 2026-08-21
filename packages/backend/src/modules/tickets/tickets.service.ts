@@ -45,6 +45,13 @@ export interface CashClosurePrintResult {
   rawBase64: string;
 }
 
+export interface PreBillPrintResult {
+  tableId: number;
+  orderId: number;
+  preview: string;
+  rawBase64: string;
+}
+
 export interface CashSummaryResult {
   activeSession: {
     id: number;
@@ -197,6 +204,87 @@ function buildPrintableTicketPayload(ticket: {
     total: parseFloat(ticket.total.toString()),
     logoPngBase64: ticket.logoPngBase64 ?? undefined,
     qrBase64: ticket.qrBase64 ?? undefined,
+  };
+}
+
+async function buildPreBillPrintablePayload(tableId: number) {
+  const table = await prisma.table.findUnique({
+    where: { id: tableId },
+    include: {
+      venue: {
+        include: {
+          organisation: {
+            select: { name: true, nif: true, address: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!table) {
+    throw new Error('Mesa no encontrada');
+  }
+
+  const order = await prisma.order.findFirst({
+    where: {
+      tableId,
+      venueId: table.venueId,
+      status: { in: [OrderStatus.OPEN, OrderStatus.SENT_TO_KITCHEN, OrderStatus.READY] },
+    },
+    include: {
+      items: {
+        include: { product: true },
+      },
+      user: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!order || order.items.length === 0) {
+    throw new Error('No hay una comanda activa para emitir el pre-ticket');
+  }
+
+  const effectiveNif = table.venue.useOrgNif ? table.venue.organisation.nif : (table.venue.nifOverride ?? table.venue.organisation.nif);
+  const effectiveName = table.venue.useOrgNif ? table.venue.organisation.name : (table.venue.nameOverride ?? table.venue.organisation.name);
+  const effectiveAddress = table.venue.address ?? table.venue.organisation.address ?? '';
+  const logoPngBase64 = await getTicketLogoBase64(table.venue.organisationId);
+
+  const subtotal = order.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity / (1 + Number(item.vatRate) / 100), 0);
+  const total = order.items.reduce((sum, item) => sum + Number(item.unitPrice) * item.quantity, 0);
+  const vatAmount = total - subtotal;
+  const dominantVatRate = Number(order.items[0]?.vatRate ?? 10);
+  const now = new Date();
+  const preBillCode = `PRE-${table.venue.invoiceSeries}-${table.number}-${order.id}`;
+
+  const printable = {
+    businessName: effectiveName,
+    businessNif: effectiveNif,
+    businessAddress: effectiveAddress,
+    invoiceCode: preBillCode,
+    issuedAt: now,
+    tableNumber: table.number,
+    waiterName: order.user.name,
+    items: order.items.map((item) => ({
+      name: item.product.name,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice),
+      notes: getVisibleNotes(item.notes),
+    })),
+    subtotal,
+    vatAmount,
+    vatRate: dominantVatRate,
+    total,
+    logoPngBase64,
+    documentTitle: 'PRE-TICKET',
+    documentCodeLabel: 'Referencia',
+    showFiscalInfo: false,
+    footerMessage: 'Importe informativo pendiente de cobro',
+  };
+
+  return {
+    table,
+    order,
+    printable,
   };
 }
 
@@ -776,6 +864,49 @@ export async function reprintTicket(ticketId: number) {
   }, buffer);
 
   return { success: true };
+}
+
+export async function getPreBillRaw(tableId: number): Promise<PreBillPrintResult> {
+  const { order, printable } = await buildPreBillPrintablePayload(tableId);
+  const buffer = buildTicketBuffer(printable);
+
+  return {
+    tableId,
+    orderId: order.id,
+    preview: buildTicketPreviewText(printable),
+    rawBase64: buffer.toString('base64'),
+  };
+}
+
+export async function printPreBill(tableId: number) {
+  const { table, printable } = await buildPreBillPrintablePayload(tableId);
+  const buffer = buildTicketBuffer(printable);
+
+  const printer = await prisma.printer.findFirst({
+    where: {
+      venueId: table.venueId,
+      type: 'RECEIPT',
+      isActive: true,
+    },
+    orderBy: { id: 'asc' },
+  });
+
+  if (!printer) {
+    throw new Error('No hay impresora de tickets activa en esta sede');
+  }
+
+  await sendToPrinter({
+    connectionType: printer.connectionType,
+    ipAddress: printer.ipAddress ?? undefined,
+    port: printer.port ?? undefined,
+    systemName: printer.systemName ?? undefined,
+  }, buffer);
+
+  return {
+    success: true,
+    preview: buildTicketPreviewText(printable),
+    rawBase64: buffer.toString('base64'),
+  };
 }
 
 export async function getCashClosurePreview(closureId: number): Promise<CashClosurePrintResult> {

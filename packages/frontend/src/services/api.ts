@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, TicketRawData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, TicketRawData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary, PreBillRawData } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
@@ -119,6 +119,10 @@ export const ticketsApi = {
     apiClient.get<{ data: { id: number; preview: string; rawBase64: string } }>(`/api/tickets/cash-closures/${closureId}/raw`).then((r) => r.data.data),
   reprintCashClosure: (closureId: number) =>
     apiClient.post(`/api/tickets/cash-closures/${closureId}/reprint`).then((r) => r.data.data),
+  getPreBillRaw: (tableId: number) =>
+    apiClient.get<{ data: PreBillRawData }>(`/api/tickets/prebills/${tableId}/raw`).then((r) => r.data.data),
+  reprintPreBill: (tableId: number) =>
+    apiClient.post(`/api/tickets/prebills/${tableId}/reprint`).then((r) => r.data.data),
   getCashSummary: (venueId: number) =>
     apiClient.get<{ data: CashSummaryData }>('/api/tickets/cash/summary', { params: { venueId } }).then((r) => r.data.data),
   openCash: (data: { venueId: number; openingAmount: number; notes?: string }) =>

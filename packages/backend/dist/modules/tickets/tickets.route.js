@@ -145,6 +145,32 @@ async function ticketsRoutes(fastify) {
         const data = await (0, tickets_service_1.reprintCashClosure)(parseInt(request.params.id, 10));
         return reply.send({ data });
     });
+    fastify.get('/prebills/:tableId/raw', async (request, reply) => {
+        const tableId = parseInt(request.params.tableId, 10);
+        const table = await client_1.prisma.table.findUnique({
+            where: { id: tableId },
+            select: { venueId: true },
+        });
+        if (!table)
+            return reply.status(404).send({ error: 'Mesa no encontrada' });
+        if (!(0, guards_1.canAccessVenue)(request, table.venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        const data = await (0, tickets_service_1.getPreBillRaw)(tableId);
+        return reply.send({ data });
+    });
+    fastify.post('/prebills/:tableId/reprint', async (request, reply) => {
+        const tableId = parseInt(request.params.tableId, 10);
+        const table = await client_1.prisma.table.findUnique({
+            where: { id: tableId },
+            select: { venueId: true },
+        });
+        if (!table)
+            return reply.status(404).send({ error: 'Mesa no encontrada' });
+        if (!(0, guards_1.canAccessVenue)(request, table.venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        const data = await (0, tickets_service_1.printPreBill)(tableId);
+        return reply.send({ data });
+    });
     /** GET /api/tickets/:id/preview */
     fastify.get('/:id/preview', async (request, reply) => {
         const data = await (0, tickets_service_1.getTicketPreview)(parseInt(request.params.id, 10));
