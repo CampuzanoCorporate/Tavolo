@@ -164,8 +164,14 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
     if (!table) return reply.status(404).send({ error: 'Mesa no encontrada' });
     if (!canAccessVenue(request, table.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
 
-    const data = await getPreBillRaw(tableId);
-    return reply.send({ data });
+    try {
+      const data = await getPreBillRaw(tableId);
+      return reply.send({ data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el pre-ticket';
+      request.log.error({ err: error, tableId }, 'Error generando RAW de pre-ticket');
+      return reply.status(400).send({ statusCode: 400, code: 'PREBILL_ERROR', message });
+    }
   });
 
   fastify.post<{ Params: { tableId: string } }>('/prebills/:tableId/reprint', async (request, reply) => {
@@ -178,8 +184,14 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
     if (!table) return reply.status(404).send({ error: 'Mesa no encontrada' });
     if (!canAccessVenue(request, table.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
 
-    const data = await printPreBill(tableId);
-    return reply.send({ data });
+    try {
+      const data = await printPreBill(tableId);
+      return reply.send({ data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo imprimir el pre-ticket';
+      request.log.error({ err: error, tableId }, 'Error imprimiendo pre-ticket');
+      return reply.status(400).send({ statusCode: 400, code: 'PREBILL_ERROR', message });
+    }
   });
 
   /** GET /api/tickets/:id/preview */

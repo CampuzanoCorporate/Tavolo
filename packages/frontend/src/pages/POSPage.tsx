@@ -596,6 +596,51 @@ export function POSPage() {
   const handleRequestBill = async () => {
     if (!activeTable) return;
     try {
+      const pendingItems = cartItems.filter((item) => !item.sent);
+      if (pendingItems.length > 0) {
+        if (!isOnline) {
+          toast.error('No se puede emitir el pre-ticket con artículos pendientes sin conexión');
+          return;
+        }
+        if (!currentVenueId) {
+          toast.error('No hay sede activa');
+          return;
+        }
+
+        let order = activeOrder;
+        if (!order) {
+          order = await ordersApi.create({
+            tableId: activeTable.id,
+            venueId: currentVenueId,
+            items: pendingItems.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.price,
+              notes: item.notes,
+            })),
+          });
+          setActiveOrder(order);
+        } else {
+          for (const item of pendingItems) {
+            await ordersApi.addItem(order.id, {
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.price,
+              notes: item.notes,
+            });
+          }
+        }
+
+        if (currentVenue?.kitchenEnabled !== false) {
+          await ordersApi.sendToKitchen(order.id);
+        }
+
+        useAppStore.setState({
+          cartItems: useAppStore.getState().cartItems.filter((item) => item.sent),
+        });
+        await loadActiveOrder();
+      }
+
       const updatedTable = await tablesApi.requestBill(activeTable.id);
       setActiveTable(updatedTable);
       setTables(tables.map((t) => (t.id === updatedTable.id ? updatedTable : t)));
@@ -616,7 +661,11 @@ export function POSPage() {
       toast.success('Pre-ticket emitido. Mesa en estado Cuenta.');
     } catch (error) {
       console.error('[POS] Error al emitir pre-ticket:', error);
-      toast.error('No se pudo emitir el pre-ticket');
+      if (axios.isAxiosError(error) && typeof error.response?.data?.message === 'string') {
+        toast.error(error.response.data.message);
+      } else {
+        toast.error('No se pudo emitir el pre-ticket');
+      }
     }
   };
 
