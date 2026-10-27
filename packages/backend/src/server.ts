@@ -19,6 +19,7 @@ import { prisma } from './db/client';
 import { licensingRoutes } from './modules/licensing/licensing.route';
 import { getOrganisationLicenseStatus } from './modules/licensing/licensing.service';
 import { qzRoutes } from './modules/qz/qz.route';
+import { superAdminAuthRoutes } from './modules/superadmin/superadmin-auth.route';
 
 async function bootstrap() {
   const app = Fastify({
@@ -28,7 +29,18 @@ async function bootstrap() {
   // ── Plugins de seguridad ──────────────────────────────────────────────────
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
-    origin: config.server.corsOrigin,
+    origin: (origin, cb) => {
+      // Permite peticiones locales sin origin (Postman/Curl) o en desarrollo (5173 TPV + 5174 Cloud HQ)
+      if (!origin || config.server.isDev || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        cb(null, true);
+        return;
+      }
+      if (origin === config.server.corsOrigin) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error('Not allowed by CORS'), false);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
@@ -105,6 +117,7 @@ async function bootstrap() {
   await app.register(adminRoutes,    { prefix: '/api/admin' });
   await app.register(licensingRoutes, { prefix: '/api/licensing' });
   await app.register(qzRoutes, { prefix: '/api/qz' });
+  await app.register(superAdminAuthRoutes);
 
   // ── Arrancar servidor ─────────────────────────────────────────────────────
   try {

@@ -4,11 +4,17 @@
   "private": true,
   "workspaces": [
     "packages/frontend",
-    "packages/backend"
+    "packages/backend",
+    "packages/cloud-hq",
+    "packages/company-admin"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w packages/backend\" \"npm run dev -w packages/frontend\"",
+    "dev:cloud-hq": "npm run dev -w packages/cloud-hq",
+    "dev:company-admin": "npm run dev -w packages/company-admin",
     "build": "npm run build -w packages/backend && npm run build -w packages/frontend",
+    "build:cloud-hq": "npm run build -w packages/cloud-hq",
+    "build:company-admin": "npm run build -w packages/company-admin",
     "db:migrate": "npm run db:migrate -w packages/backend",
     "db:studio": "npm run db:studio -w packages/backend"
   },

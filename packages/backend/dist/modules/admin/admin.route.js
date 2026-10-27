@@ -8,6 +8,7 @@ const auth_service_1 = require("../auth/auth.service");
 const permissions_1 = require("../auth/permissions");
 const guards_1 = require("../auth/guards");
 const certificate_service_1 = require("../verifactu/certificate.service");
+const aeat_service_1 = require("../verifactu/aeat.service");
 const logo_service_1 = require("../printing/logo.service");
 // ─── SCHEMAS DE VALIDACIÓN ────────────────────────────────────────────────────
 const VenueCreateSchema = zod_1.z.object({
@@ -95,6 +96,8 @@ const ProductBaseSchema = zod_1.z.object({
     }).nullable().optional(),
     preparationStationId: zod_1.z.number().int().positive().nullable().optional(),
     isAvailable: zod_1.z.boolean().default(true),
+    stockQuantity: zod_1.z.number().int().nonnegative().optional(),
+    isStockControlEnabled: zod_1.z.boolean().optional(),
     sortOrder: zod_1.z.number().int().optional(),
 });
 const ProductSchema = ProductBaseSchema.superRefine((product, ctx) => {
@@ -226,6 +229,8 @@ function mapProductPayload(body, venueId) {
         menuConfig: body.menuConfig === null ? client_2.Prisma.JsonNull : body.menuConfig,
         preparationStationId: body.preparationStationId,
         isAvailable: body.isAvailable,
+        stockQuantity: body.stockQuantity,
+        isStockControlEnabled: body.isStockControlEnabled,
         sortOrder: body.sortOrder,
     };
 }
@@ -251,6 +256,10 @@ function mapProductUpdatePayload(body) {
         data.preparationStationId = body.preparationStationId;
     if (body.isAvailable !== undefined)
         data.isAvailable = body.isAvailable;
+    if (body.stockQuantity !== undefined)
+        data.stockQuantity = body.stockQuantity;
+    if (body.isStockControlEnabled !== undefined)
+        data.isStockControlEnabled = body.isStockControlEnabled;
     if (body.sortOrder !== undefined)
         data.sortOrder = body.sortOrder;
     return data;
@@ -544,6 +553,73 @@ async function adminRoutes(fastify) {
         }
         await (0, certificate_service_1.deleteFiscalCertificate)(request.user.organisationId);
         return reply.send({ success: true });
+    });
+    // ── Configuración Veri*factu / AEAT ──────────────────────────────────────
+    /** GET /api/admin/fiscal/config — Carga la configuración Veri*factu de la organización */
+    fastify.get('/fiscal/config', async (request, reply) => {
+        const cfg = await client_1.prisma.fiscalConfig.findUnique({
+            where: { organisationId: request.user.organisationId },
+        });
+        const defaults = {
+            environment: 'TEST',
+            customEndpointUrl: null,
+            developerName: 'Tavolo POS',
+            developerNif: null,
+            softwareName: 'TAVOLOPOS',
+            softwareId: '01',
+            softwareVersion: '1.0.0',
+            installationId: 'default',
+            onlyVerifactu: true,
+        };
+        return reply.send({
+            data: {
+                ...(cfg ?? defaults),
+                endpointUrls: {
+                    TEST: aeat_service_1.OFFICIAL_AEAT_ENDPOINTS.TEST,
+                    PRODUCTION: aeat_service_1.OFFICIAL_AEAT_ENDPOINTS.PRODUCTION,
+                },
+            },
+        });
+    });
+    /** PUT /api/admin/fiscal/config — Guarda la configuración Veri*factu */
+    fastify.put('/fiscal/config', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede configurar Veri*factu' });
+        }
+        const FiscalConfigSchema = zod_1.z.object({
+            environment: zod_1.z.enum(['TEST', 'PRODUCTION']).default('TEST'),
+            customEndpointUrl: zod_1.z
+                .union([zod_1.z.string().url(), zod_1.z.literal('')])
+                .nullable()
+                .optional()
+                .transform((val) => (val === '' || !val ? null : val)),
+            developerName: zod_1.z.string().min(2).max(120).default('Tavolo POS'),
+            developerNif: zod_1.z
+                .union([zod_1.z.string().max(20), zod_1.z.literal('')])
+                .nullable()
+                .optional()
+                .transform((val) => (val === '' || !val ? null : val)),
+            softwareName: zod_1.z.string().min(1).max(30).default('TAVOLOPOS'),
+            softwareId: zod_1.z.string().min(1).max(2).default('01'),
+            softwareVersion: zod_1.z.string().min(1).max(50).default('1.0.0'),
+            installationId: zod_1.z.string().min(1).max(100).default('default'),
+            onlyVerifactu: zod_1.z.boolean().default(true),
+        });
+        const body = FiscalConfigSchema.parse(request.body);
+        const cfg = await client_1.prisma.fiscalConfig.upsert({
+            where: { organisationId: request.user.organisationId },
+            create: { ...body, organisationId: request.user.organisationId },
+            update: body,
+        });
+        return reply.send({ data: cfg });
+    });
+    /** POST /api/admin/fiscal/test-aeat — Prueba la conexión mTLS con la AEAT */
+    fastify.post('/fiscal/test-aeat', async (request, reply) => {
+        if (request.user.role !== 'ADMIN') {
+            return reply.status(403).send({ error: 'Solo el ADMIN puede probar la conexión con la AEAT' });
+        }
+        const result = await (0, aeat_service_1.testAeatConnection)(request.user.organisationId);
+        return reply.send({ data: result });
     });
     fastify.get('/branding/ticket-logo', async (request, reply) => {
         return reply.send({
@@ -1123,7 +1199,65 @@ async function adminRoutes(fastify) {
         ]);
         return reply.send({ data: tickets, total, billedTotal: Number(aggregate._sum.total ?? 0) });
     });
-    /** GET /api/admin/venues/:id/cash-closures — Histórico de cierres de caja */
+    /** GET /api/admin/cash-closures — Histórico de cierres de caja de toda la organización */
+    fastify.get('/cash-closures', async (request, reply) => {
+        if (!(0, guards_1.requirePermission)(request, reply, 'VIEW_FINANCIALS'))
+            return;
+        try {
+            const venues = await client_1.prisma.venue.findMany({
+                where: {
+                    organisationId: request.user.organisationId,
+                    ...(request.user.role !== 'ADMIN' ? { id: { in: request.user.venueIds } } : {}),
+                },
+                select: { id: true, name: true },
+            });
+            const venueIds = venues.map((v) => v.id);
+            const [closures, aggregate] = await Promise.all([
+                client_1.prisma.cashClosure.findMany({
+                    where: { venueId: { in: venueIds } },
+                    include: {
+                        user: { select: { id: true, name: true } },
+                        venue: { select: { id: true, name: true } },
+                    },
+                    orderBy: { periodEnd: 'desc' },
+                    take: 200,
+                }),
+                client_1.prisma.cashClosure.aggregate({
+                    where: { venueId: { in: venueIds } },
+                    _sum: { billedTotal: true, ticketCount: true },
+                }),
+            ]);
+            return reply.send({
+                data: closures.map((c) => ({
+                    ...c,
+                    billedTotal: Number(c.billedTotal),
+                    openingAmount: Number(c.openingAmount),
+                    manualInTotal: Number(c.manualInTotal),
+                    manualOutTotal: Number(c.manualOutTotal),
+                    cashSalesTotal: Number(c.cashSalesTotal),
+                    cardSalesTotal: Number(c.cardSalesTotal),
+                    vatTotal: Number(c.vatTotal),
+                    expectedAmount: Number(c.expectedAmount),
+                    countedAmount: Number(c.countedAmount),
+                    discrepancyAmount: Number(c.discrepancyAmount),
+                })),
+                totals: {
+                    billedTotal: Number(aggregate._sum.billedTotal ?? 0),
+                    ticketCount: Number(aggregate._sum.ticketCount ?? 0),
+                },
+            });
+        }
+        catch (error) {
+            if (error instanceof client_2.Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
+                return reply.send({
+                    data: [],
+                    totals: { billedTotal: 0, ticketCount: 0 },
+                });
+            }
+            throw error;
+        }
+    });
+    /** GET /api/admin/venues/:id/cash-closures — Histórico de cierres de caja por sede */
     fastify.get('/venues/:id/cash-closures', async (request, reply) => {
         const venueId = parseInt(request.params.id, 10);
         assertVenueAccess(venueId, request.user.venueIds, request.user.role);

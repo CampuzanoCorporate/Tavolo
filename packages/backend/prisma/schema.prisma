@@ -30,6 +30,7 @@ model Organisation {
   licenses License[]
   fiscalCertificate FiscalCertificate?
   ticketLogo TicketLogo?
+  fiscalConfig FiscalConfig?
 
   @@map("organisations")
 }
@@ -78,6 +79,7 @@ model User {
   role           Role         @default(WAITER)
   permissions    String[]     @default([])
   password       String       @db.VarChar(60)
+  mustChangePassword Boolean  @default(false)
   organisationId Int
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   isActive       Boolean      @default(true)
@@ -226,6 +228,9 @@ model Product {
   sortOrder   Int      @default(0)
   preparationStationId Int?
   preparationStation   ProductionStation? @relation(fields: [preparationStationId], references: [id])
+
+  stockQuantity Int      @default(100)
+  isStockControlEnabled Boolean @default(false)
 
   orderItems OrderItem[]
 
@@ -391,6 +396,10 @@ model Ticket {
   businessNif     String   @db.VarChar(20)
   businessAddress String   @db.VarChar(500)
 
+  isRectified         Boolean @default(false)
+  rectificationReason String? @db.VarChar(255)
+  rectifiedTicketId   Int?
+
   cashMovements CashMovement[]
 
   @@unique([venueId, invoiceSeries, invoiceNumber])
@@ -506,6 +515,9 @@ model License {
   organisation     Organisation? @relation(fields: [organisationId], references: [id])
   code             String        @unique @db.VarChar(64)
   label            String?       @db.VarChar(120)
+  planType         String        @default("PRO") @db.VarChar(20)
+  maxScreens       Int           @default(5)
+  hasKitchenDisplay Boolean      @default(true)
   status           LicenseStatus @default(ACTIVE)
   validFrom        DateTime      @default(now())
   validUntil       DateTime
@@ -560,6 +572,25 @@ model TicketLogo {
   updatedAt        DateTime     @updatedAt
 
   @@map("ticket_logos")
+}
+
+model FiscalConfig {
+  id                Int          @id @default(autoincrement())
+  organisationId    Int          @unique
+  organisation      Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  environment       String       @default("TEST") @db.VarChar(20)
+  customEndpointUrl String?      @db.VarChar(255)
+  developerName     String       @default("Tavolo POS") @db.VarChar(120)
+  developerNif      String?      @db.VarChar(20)
+  softwareName      String       @default("TAVOLOPOS") @db.VarChar(30)
+  softwareId        String       @default("01") @db.VarChar(2)
+  softwareVersion   String       @default("1.0.0") @db.VarChar(50)
+  installationId    String       @default("default") @db.VarChar(100)
+  onlyVerifactu     Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@map("fiscal_configs")
 }
 
 enum AeatStatus {

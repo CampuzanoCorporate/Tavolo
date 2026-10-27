@@ -7,7 +7,7 @@ import type { KitchenQueueItem, KitchenQueueSummaryItem, ProductionStation } fro
 type KitchenFilter = 'ALL' | 'PENDING' | 'IN_PROGRESS';
 
 export function KitchenPage() {
-  const { currentVenue, currentVenueId } = useAppStore();
+  const { currentVenue, currentVenueId, licenseStatus } = useAppStore();
   const [items, setItems] = useState<KitchenQueueItem[]>([]);
   const [summary, setSummary] = useState<KitchenQueueSummaryItem[]>([]);
   const [stations, setStations] = useState<ProductionStation[]>([]);
@@ -308,6 +308,27 @@ export function KitchenPage() {
       toast.error('No se pudo recuperar la preparación');
     }
   };
+
+  if (licenseStatus?.license && licenseStatus.license.hasKitchenDisplay === false) {
+    return (
+      <div className="kitchen-page" style={{ padding: '3rem', textAlign: 'center', maxWidth: 600, margin: '4rem auto' }}>
+        <div style={{ background: 'var(--color-surface)', padding: '2.5rem', borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+          <h2 style={{ fontSize: '1.4rem', color: 'var(--color-text-primary)', marginBottom: '1rem', fontWeight: 800 }}>
+            Visor de Cocina No Incluido
+          </h2>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: '1.25rem', lineHeight: 1.5, fontSize: '0.9rem' }}>
+            El módulo Visor de Cocina (KDS) no está disponible en el plan actual de esta sede (<strong>Plan BASIC</strong>).
+          </p>
+          <div style={{ background: 'var(--color-surface-2)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
+            Para activar la pantalla de cocina y estaciones de producción, actualiza tu licencia a <strong>Plan PRO</strong> o <strong>ENTERPRISE</strong>.
+          </div>
+          <a href="/admin/licensing" className="btn btn-primary" style={{ display: 'inline-block', padding: '0.65rem 1.25rem', fontWeight: 700, textDecoration: 'none' }}>
+            Ir a Gestión de Licencias
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return <div className="admin-loading">Cargando cocina...</div>;

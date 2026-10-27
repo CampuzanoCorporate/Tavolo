@@ -45,8 +45,8 @@ export const config = {
    *     en cada factura emitida — se persiste como snapshot en DB.
    */
   business: {
-    name: required('BUSINESS_NAME'),
-    nif: required('BUSINESS_NIF'),
+    name: optional('BUSINESS_NAME', 'Tavolo POS'),
+    nif: optional('BUSINESS_NIF', ''),
     address: optional('BUSINESS_ADDRESS', ''),
     invoiceSeries: optional('INVOICE_SERIES', 'T'),
   },
@@ -56,7 +56,7 @@ export const config = {
    * La remisión VERI*FACTU usa el certificado cargado desde administración.
    */
   aeat: {
-    deliveryMode: optional('AEAT_DELIVERY_MODE', 'simulate'),
+    deliveryMode: optional('AEAT_DELIVERY_MODE', 'real'),
     endpointUrl: optional(
       'AEAT_ENDPOINT_URL',
       'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP'
@@ -80,7 +80,7 @@ export const config = {
   },
 
   licensing: {
-    masterKey: optional('LICENSE_MASTER_KEY', ''),
+    masterKey: optional('LICENSE_MASTER_KEY', 'tavolo-master-license-key-change-in-prod'),
     defaultValidityDays: parseInt(optional('LICENSE_VALIDITY_DAYS', '30'), 10),
     defaultGraceDays: parseInt(optional('LICENSE_GRACE_DAYS', '7'), 10),
   },

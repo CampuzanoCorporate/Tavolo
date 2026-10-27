@@ -24,6 +24,7 @@ const client_1 = require("./db/client");
 const licensing_route_1 = require("./modules/licensing/licensing.route");
 const licensing_service_1 = require("./modules/licensing/licensing.service");
 const qz_route_1 = require("./modules/qz/qz.route");
+const superadmin_auth_route_1 = require("./modules/superadmin/superadmin-auth.route");
 async function bootstrap() {
     const app = (0, fastify_1.default)({
         logger: { level: config_1.config.server.isDev ? 'debug' : 'warn' },
@@ -31,7 +32,18 @@ async function bootstrap() {
     // ── Plugins de seguridad ──────────────────────────────────────────────────
     await app.register(helmet_1.default, { contentSecurityPolicy: false });
     await app.register(cors_1.default, {
-        origin: config_1.config.server.corsOrigin,
+        origin: (origin, cb) => {
+            // Permite peticiones locales sin origin (Postman/Curl) o en desarrollo (5173 TPV + 5174 Cloud HQ)
+            if (!origin || config_1.config.server.isDev || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+                cb(null, true);
+                return;
+            }
+            if (origin === config_1.config.server.corsOrigin) {
+                cb(null, true);
+                return;
+            }
+            cb(new Error('Not allowed by CORS'), false);
+        },
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         credentials: true,
     });
@@ -98,6 +110,7 @@ async function bootstrap() {
     await app.register(admin_route_1.adminRoutes, { prefix: '/api/admin' });
     await app.register(licensing_route_1.licensingRoutes, { prefix: '/api/licensing' });
     await app.register(qz_route_1.qzRoutes, { prefix: '/api/qz' });
+    await app.register(superadmin_auth_route_1.superAdminAuthRoutes);
     // ── Arrancar servidor ─────────────────────────────────────────────────────
     try {
         await app.listen({ port: config_1.config.server.port, host: '0.0.0.0' });

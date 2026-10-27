@@ -47,4 +47,25 @@ export async function authRoutes(fastify: FastifyInstance) {
     if (!profile) return reply.status(404).send({ error: 'Usuario no encontrado' });
     return reply.send({ data: profile });
   });
+
+  /**
+   * POST /api/auth/change-password
+   * Cambia la contraseña del usuario e invalida la bandera de contraseña provisional (mustChangePassword = false).
+   */
+  fastify.post('/change-password', { onRequest: [fastify.authenticate] }, async (request, reply) => {
+    const schema = z.object({
+      oldPassword: z.string().min(1),
+      newPassword: z.string().min(6),
+    });
+
+    const { oldPassword, newPassword } = schema.parse(request.body);
+    const { changeUserPassword } = await import('./auth.service');
+    const updatedUser = await changeUserPassword(request.user.userId, oldPassword, newPassword);
+
+    const profile = await getUserProfile(updatedUser.id);
+    return reply.send({
+      message: 'Contraseña actualizada con éxito',
+      user: profile,
+    });
+  });
 }

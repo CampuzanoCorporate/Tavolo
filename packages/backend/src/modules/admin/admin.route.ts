@@ -20,6 +20,10 @@ import {
   saveFiscalCertificate,
 } from '../verifactu/certificate.service';
 import {
+  testAeatConnection,
+  OFFICIAL_AEAT_ENDPOINTS,
+} from '../verifactu/aeat.service';
+import {
   deleteTicketLogo,
   getTicketLogoSummary,
   saveTicketLogo,
@@ -118,6 +122,8 @@ const ProductBaseSchema = z.object({
   }).nullable().optional(),
   preparationStationId: z.number().int().positive().nullable().optional(),
   isAvailable: z.boolean().default(true),
+  stockQuantity: z.number().int().nonnegative().optional(),
+  isStockControlEnabled: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 });
 
@@ -264,6 +270,8 @@ function mapProductPayload(body: z.infer<typeof ProductBaseSchema>, venueId: num
     menuConfig: body.menuConfig === null ? Prisma.JsonNull : body.menuConfig,
     preparationStationId: body.preparationStationId,
     isAvailable: body.isAvailable,
+    stockQuantity: body.stockQuantity,
+    isStockControlEnabled: body.isStockControlEnabled,
     sortOrder: body.sortOrder,
   };
 }
@@ -281,6 +289,8 @@ function mapProductUpdatePayload(body: z.infer<typeof ProductUpdateSchema>): Pri
   if (body.menuConfig !== undefined) data.menuConfig = body.menuConfig === null ? Prisma.JsonNull : body.menuConfig;
   if (body.preparationStationId !== undefined) data.preparationStationId = body.preparationStationId;
   if (body.isAvailable !== undefined) data.isAvailable = body.isAvailable;
+  if (body.stockQuantity !== undefined) data.stockQuantity = body.stockQuantity;
+  if (body.isStockControlEnabled !== undefined) data.isStockControlEnabled = body.isStockControlEnabled;
   if (body.sortOrder !== undefined) data.sortOrder = body.sortOrder;
 
   return data;
@@ -603,6 +613,80 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
     await deleteFiscalCertificate(request.user.organisationId);
     return reply.send({ success: true });
+  });
+
+  // ── Configuración Veri*factu / AEAT ──────────────────────────────────────
+
+  /** GET /api/admin/fiscal/config — Carga la configuración Veri*factu de la organización */
+  fastify.get('/fiscal/config', async (request, reply) => {
+    const cfg = await prisma.fiscalConfig.findUnique({
+      where: { organisationId: request.user.organisationId },
+    });
+    const defaults = {
+      environment: 'TEST',
+      customEndpointUrl: null,
+      developerName: 'Tavolo POS',
+      developerNif: null,
+      softwareName: 'TAVOLOPOS',
+      softwareId: '01',
+      softwareVersion: '1.0.0',
+      installationId: 'default',
+      onlyVerifactu: true,
+    };
+    return reply.send({
+      data: {
+        ...(cfg ?? defaults),
+        endpointUrls: {
+          TEST: OFFICIAL_AEAT_ENDPOINTS.TEST,
+          PRODUCTION: OFFICIAL_AEAT_ENDPOINTS.PRODUCTION,
+        },
+      },
+    });
+  });
+
+  /** PUT /api/admin/fiscal/config — Guarda la configuración Veri*factu */
+  fastify.put('/fiscal/config', async (request, reply) => {
+    if (request.user.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Solo el ADMIN puede configurar Veri*factu' });
+    }
+
+    const FiscalConfigSchema = z.object({
+      environment: z.enum(['TEST', 'PRODUCTION']).default('TEST'),
+      customEndpointUrl: z
+        .union([z.string().url(), z.literal('')])
+        .nullable()
+        .optional()
+        .transform((val) => (val === '' || !val ? null : val)),
+      developerName: z.string().min(2).max(120).default('Tavolo POS'),
+      developerNif: z
+        .union([z.string().max(20), z.literal('')])
+        .nullable()
+        .optional()
+        .transform((val) => (val === '' || !val ? null : val)),
+      softwareName: z.string().min(1).max(30).default('TAVOLOPOS'),
+      softwareId: z.string().min(1).max(2).default('01'),
+      softwareVersion: z.string().min(1).max(50).default('1.0.0'),
+      installationId: z.string().min(1).max(100).default('default'),
+      onlyVerifactu: z.boolean().default(true),
+    });
+
+    const body = FiscalConfigSchema.parse(request.body);
+    const cfg = await prisma.fiscalConfig.upsert({
+      where: { organisationId: request.user.organisationId },
+      create: { ...body, organisationId: request.user.organisationId },
+      update: body,
+    });
+
+    return reply.send({ data: cfg });
+  });
+
+  /** POST /api/admin/fiscal/test-aeat — Prueba la conexión mTLS con la AEAT */
+  fastify.post('/fiscal/test-aeat', async (request, reply) => {
+    if (request.user.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'Solo el ADMIN puede probar la conexión con la AEAT' });
+    }
+    const result = await testAeatConnection(request.user.organisationId);
+    return reply.send({ data: result });
   });
 
   fastify.get('/branding/ticket-logo', async (request, reply) => {
@@ -1223,7 +1307,68 @@ export async function adminRoutes(fastify: FastifyInstance) {
     return reply.send({ data: tickets, total, billedTotal: Number(aggregate._sum.total ?? 0) });
   });
 
-  /** GET /api/admin/venues/:id/cash-closures — Histórico de cierres de caja */
+  /** GET /api/admin/cash-closures — Histórico de cierres de caja de toda la organización */
+  fastify.get('/cash-closures', async (request, reply) => {
+    if (!requirePermission(request, reply, 'VIEW_FINANCIALS')) return;
+
+    try {
+      const venues = await prisma.venue.findMany({
+        where: {
+          organisationId: request.user.organisationId,
+          ...(request.user.role !== 'ADMIN' ? { id: { in: request.user.venueIds } } : {}),
+        },
+        select: { id: true, name: true },
+      });
+
+      const venueIds = venues.map((v) => v.id);
+
+      const [closures, aggregate] = await Promise.all([
+        prisma.cashClosure.findMany({
+          where: { venueId: { in: venueIds } },
+          include: {
+            user: { select: { id: true, name: true } },
+            venue: { select: { id: true, name: true } },
+          },
+          orderBy: { periodEnd: 'desc' },
+          take: 200,
+        }),
+        prisma.cashClosure.aggregate({
+          where: { venueId: { in: venueIds } },
+          _sum: { billedTotal: true, ticketCount: true },
+        }),
+      ]);
+
+      return reply.send({
+        data: closures.map((c) => ({
+          ...c,
+          billedTotal: Number(c.billedTotal),
+          openingAmount: Number(c.openingAmount),
+          manualInTotal: Number(c.manualInTotal),
+          manualOutTotal: Number(c.manualOutTotal),
+          cashSalesTotal: Number(c.cashSalesTotal),
+          cardSalesTotal: Number(c.cardSalesTotal),
+          vatTotal: Number(c.vatTotal),
+          expectedAmount: Number(c.expectedAmount),
+          countedAmount: Number(c.countedAmount),
+          discrepancyAmount: Number(c.discrepancyAmount),
+        })),
+        totals: {
+          billedTotal: Number(aggregate._sum.billedTotal ?? 0),
+          ticketCount: Number(aggregate._sum.ticketCount ?? 0),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
+        return reply.send({
+          data: [],
+          totals: { billedTotal: 0, ticketCount: 0 },
+        });
+      }
+      throw error;
+    }
+  });
+
+  /** GET /api/admin/venues/:id/cash-closures — Histórico de cierres de caja por sede */
   fastify.get<{ Params: { id: string } }>('/venues/:id/cash-closures', async (request, reply) => {
     const venueId = parseInt(request.params.id, 10);
     assertVenueAccess(venueId, request.user.venueIds, request.user.role);

@@ -86,6 +86,9 @@ export interface LicenseRecord {
   organisationId?: number | null;
   code: string;
   label?: string | null;
+  planType?: string;
+  maxScreens?: number;
+  hasKitchenDisplay?: boolean;
   status: LicenseStatus;
   validFrom: string;
   validUntil: string;
@@ -111,6 +114,7 @@ export interface AuthUser {
   email: string;
   role: Role;
   permissions: AppPermission[];
+  mustChangePassword?: boolean;
   organisation: { id: number; name: string; nif: string };
   venueUsers: Array<{ venue: Venue }>;
 }
@@ -152,6 +156,60 @@ export interface FiscalCertificateSummary {
   fileSha256: string;
   uploadedAt: string;
   updatedAt: string;
+}
+
+export interface FiscalConfig {
+  id: number;
+  organisationId: number;
+  environment: 'TEST' | 'PRODUCTION';
+  customEndpointUrl: string | null;
+  developerName: string;
+  developerNif: string | null;
+  softwareName: string;
+  softwareId: string;
+  softwareVersion: string;
+  installationId: string;
+  onlyVerifactu: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Populated by the API response */
+  endpointUrls?: { TEST: string; PRODUCTION: string };
+}
+
+export interface FiscalConnectionTestResult {
+  ok: boolean;
+  message: string;
+  httpStatus?: number;
+  detail?: string;
+}
+
+export interface SuperAdminOrganisation {
+  id: number;
+  name: string;
+  nif: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  isActive: boolean;
+  venues: Array<{ id: number; name: string; slug: string; isActive: boolean }>;
+  fiscalConfig: FiscalConfig | null;
+  hasCertificate: boolean;
+  certificateSummary: {
+    id: number;
+    label: string | null;
+    originalFilename: string;
+    fileSizeBytes: number;
+    uploadedAt: string;
+  } | null;
+  activeLicense: (LicenseRecord & {
+    evaluation?: {
+      canOperate: boolean;
+      canWrite: boolean;
+      effectiveState: EffectiveLicenseState;
+      reason?: string;
+      daysRemaining?: number;
+    };
+  }) | null;
 }
 
 export interface QuarterlyReport {
@@ -373,6 +431,7 @@ export interface CashSummaryTicket {
   invoiceCode: string;
   issuedAt: string;
   total: number | string;
+  paymentMethod: 'CASH' | 'CARD';
 }
 
 export interface CashSummaryData {

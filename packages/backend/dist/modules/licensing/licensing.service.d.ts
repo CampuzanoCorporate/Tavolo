@@ -4,6 +4,7 @@ export interface LicenseEvaluation {
     effectiveState: EffectiveLicenseState;
     canWrite: boolean;
     reason: string;
+    daysRemaining: number;
     license: License | null;
 }
 export declare function buildLicenseDates(validityDays?: number, graceDays?: number): {
@@ -21,6 +22,9 @@ export declare function getCurrentOrganisationLicense(organisationId: number): P
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;
@@ -39,6 +43,9 @@ export declare function touchOrganisationLicense(organisationId: number): Promis
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;
@@ -51,6 +58,9 @@ export declare function touchOrganisationLicense(organisationId: number): Promis
 export declare function generateLicense(params: {
     organisationId?: number;
     label?: string;
+    planType?: string;
+    maxScreens?: number;
+    hasKitchenDisplay?: boolean;
     status?: LicenseStatus;
     validityDays?: number;
     graceDays?: number;
@@ -63,6 +73,9 @@ export declare function generateLicense(params: {
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;
@@ -80,6 +93,9 @@ export declare function activateLicenseForOrganisation(code: string, organisatio
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;
@@ -97,6 +113,9 @@ export declare function refreshLicense(id: number, validityDays?: number): Promi
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;
@@ -114,6 +133,9 @@ export declare function updateLicenseStatus(id: number, status: LicenseStatus): 
     code: string;
     status: import(".prisma/client").$Enums.LicenseStatus;
     label: string | null;
+    planType: string;
+    maxScreens: number;
+    hasKitchenDisplay: boolean;
     validFrom: Date;
     validUntil: Date;
     graceDays: number;

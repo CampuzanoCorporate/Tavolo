@@ -119,6 +119,7 @@ export declare function getTicketPreview(ticketId: number): Promise<{
                 role: import(".prisma/client").$Enums.Role;
                 permissions: string[];
                 password: string;
+                mustChangePassword: boolean;
                 organisationId: number;
                 isActive: boolean;
                 createdAt: Date;
@@ -154,6 +155,8 @@ export declare function getTicketPreview(ticketId: number): Promise<{
                     imagePath: string | null;
                     sortOrder: number;
                     preparationStationId: number | null;
+                    stockQuantity: number;
+                    isStockControlEnabled: boolean;
                 };
             } & {
                 id: number;
@@ -198,6 +201,9 @@ export declare function getTicketPreview(ticketId: number): Promise<{
         businessName: string;
         businessNif: string;
         businessAddress: string;
+        isRectified: boolean;
+        rectificationReason: string | null;
+        rectifiedTicketId: number | null;
     };
     preview: string;
 }>;
@@ -317,4 +323,99 @@ export declare function closeCashRegister(input: {
     countedAmount: Prisma.Decimal;
     discrepancyAmount: Prisma.Decimal;
 }>;
+/**
+ * Reenvía un ticket específico a la AEAT (para tickets en estado ERROR o PENDING).
+ */
+export declare function transmitTicketRecordToAeat(ticketId: number, venueId?: number): Promise<{
+    success: boolean;
+    ticket: {
+        id: number;
+        userId: number;
+        venueId: number;
+        invoiceSeries: string;
+        orderId: number;
+        paymentMethod: import(".prisma/client").$Enums.PaymentMethod;
+        invoiceNumber: number;
+        invoiceCode: string;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        total: Prisma.Decimal;
+        hashSelf: string;
+        hashPrevious: string;
+        previousInvoiceCode: string | null;
+        aeatStatus: import(".prisma/client").$Enums.AeatStatus;
+        aeatSentAt: Date | null;
+        aeatResponseCode: string | null;
+        aeatResponseMsg: string | null;
+        aeatPayloadJson: string | null;
+        issuedAt: Date;
+        businessName: string;
+        businessNif: string;
+        businessAddress: string;
+        isRectified: boolean;
+        rectificationReason: string | null;
+        rectifiedTicketId: number | null;
+    };
+    result: import("../verifactu/aeat.service").AeatSubmissionResult;
+    error?: undefined;
+} | {
+    success: boolean;
+    ticket: {
+        id: number;
+        userId: number;
+        venueId: number;
+        invoiceSeries: string;
+        orderId: number;
+        paymentMethod: import(".prisma/client").$Enums.PaymentMethod;
+        invoiceNumber: number;
+        invoiceCode: string;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        total: Prisma.Decimal;
+        hashSelf: string;
+        hashPrevious: string;
+        previousInvoiceCode: string | null;
+        aeatStatus: import(".prisma/client").$Enums.AeatStatus;
+        aeatSentAt: Date | null;
+        aeatResponseCode: string | null;
+        aeatResponseMsg: string | null;
+        aeatPayloadJson: string | null;
+        issuedAt: Date;
+        businessName: string;
+        businessNif: string;
+        businessAddress: string;
+        isRectified: boolean;
+        rectificationReason: string | null;
+        rectifiedTicketId: number | null;
+    };
+    error: string;
+    result?: undefined;
+}>;
+/**
+ * Reenvía secuencialmente a la AEAT todos los tickets de una sede que están en estado ERROR o PENDING.
+ */
+export declare function resendPendingTicketsToAeat(venueId: number): Promise<{
+    total: number;
+    successful: number;
+    failed: number;
+    results: {
+        ticketId: number;
+        invoiceCode: string;
+        success: boolean;
+        message: string;
+    }[];
+}>;
+export interface RectifyTicketInput {
+    ticketId: number;
+    userId: number;
+    venueId: number;
+    reason: string;
+}
+export interface RectifyTicketResult {
+    rectifyingTicketId: number;
+    rectifyingInvoiceCode: string;
+    originalInvoiceCode: string;
+    total: number;
+}
+export declare function rectifyTicket(input: RectifyTicketInput): Promise<RectifyTicketResult>;
 //# sourceMappingURL=tickets.service.d.ts.map

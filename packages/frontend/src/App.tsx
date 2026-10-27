@@ -186,9 +186,13 @@ function Navbar() {
         )}
 
         {licenseStatus && licenseStatus.effectiveState !== 'ACTIVE' && (
-          <span className={`license-pill license-pill--${licenseStatus.effectiveState.toLowerCase()}`}>
+          <NavLink
+            to="/admin/licensing"
+            className={`license-pill license-pill--${licenseStatus.effectiveState.toLowerCase()}`}
+            style={{ textDecoration: 'none', cursor: 'pointer' }}
+          >
             {licenseStatus.effectiveState === 'GRACE' ? 'Licencia en gracia' : 'Licencia bloqueada'}
-          </span>
+          </NavLink>
         )}
 
         {currentUser && !isAdmin && (
@@ -221,7 +225,7 @@ function Navbar() {
 
 function LicenseOverlay() {
   const location = useLocation();
-  const { currentUser, licenseStatus } = useAppStore();
+  const { licenseStatus } = useAppStore();
 
   if (!licenseStatus || licenseStatus.effectiveState !== 'BLOCKED') {
     return null;
@@ -234,17 +238,13 @@ function LicenseOverlay() {
   return (
     <div className="license-overlay">
       <div className="license-overlay__card">
-        <h2>Licencia bloqueada</h2>
+        <h2>Licencia Bloqueada</h2>
         <p>{licenseStatus.reason}</p>
-        {currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER') ? (
-          <NavLink to="/admin/licensing" className="btn btn-primary">
-            Ir a licencias
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '0.5rem' }}>
+          <NavLink to="/admin/licensing" className="btn btn-primary" style={{ padding: '0.65rem 1.25rem', fontWeight: 700 }}>
+            Ir al Apartado de Licencias
           </NavLink>
-        ) : (
-          <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-            Contacta con el administrador para reactivar el servicio.
-          </p>
-        )}
+        </div>
       </div>
     </div>
   );

@@ -41,21 +41,17 @@ export function PaymentModal({
   const [method, setMethod] = useState<'CASH' | 'CARD'>('CARD');
   const [delivered, setDelivered] = useState<string>('');
   const [change, setChange] = useState<number>(0);
+  const [showNumpad, setShowNumpad] = useState<boolean>(false);
 
   const deliveredNum = parseFloat(delivered) || 0;
 
   useEffect(() => {
     if (method === 'CASH') {
-      setDelivered((prev) => {
-        if (!prev || Number.parseFloat(prev) < total) {
-          return total.toFixed(2);
-        }
-        return prev;
-      });
-      return;
+      setDelivered(total.toFixed(2));
+    } else {
+      setDelivered('');
+      setShowNumpad(false);
     }
-
-    setDelivered('');
   }, [method, total]);
 
   // Calcular el cambio a devolver
@@ -68,7 +64,7 @@ export function PaymentModal({
   }, [method, deliveredNum, total]);
 
   const handleQuickAmount = (amount: number) => {
-    setDelivered(amount.toString());
+    setDelivered(amount.toFixed(2));
   };
 
   const handleKeyPress = (key: string) => {
@@ -99,7 +95,7 @@ export function PaymentModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()} style={{ maxWidth: 460 }}>
+      <div className="modal" onClick={(event) => event.stopPropagation()} style={{ maxWidth: 480 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
           <h3 className="modal__title" style={{ margin: 0 }}>
             {splitInfo
@@ -110,8 +106,8 @@ export function PaymentModal({
             type="button"
             className="modal-close"
             onClick={onClose}
-            style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--color-text-muted)' }}
             aria-label="Cerrar"
+            style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: 'var(--color-text-muted)' }}
           >
             ×
           </button>
@@ -120,20 +116,18 @@ export function PaymentModal({
         {/* Banner de confirmación del pago anterior si existe */}
         {lastPayment && (
           <div style={{
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.25)',
+            background: 'var(--color-surface-2)',
+            border: '1px solid var(--color-border)',
             padding: 'var(--space-3) var(--space-4)',
             borderRadius: 'var(--radius-md)',
             marginBottom: 'var(--space-4)',
             fontSize: '0.88rem',
-            color: 'var(--color-success, #10b981)',
             display: 'flex',
             flexDirection: 'column',
             gap: '4px',
-            animation: 'fadeIn 0.2s ease',
           }}>
-            <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: '1.1rem' }}>✓</span> Parte anterior cobrada con éxito
+            <div style={{ fontWeight: 700 }}>
+              Parte anterior cobrada con éxito
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
               <span>Ticket: {lastPayment.invoiceCode}</span>
@@ -143,12 +137,9 @@ export function PaymentModal({
               <div style={{
                 marginTop: 4,
                 fontSize: '0.9rem',
-                fontWeight: 800,
-                background: 'rgba(16, 185, 129, 0.15)',
-                padding: '4px 8px',
-                borderRadius: 4,
+                fontWeight: 700,
                 textAlign: 'center',
-                color: 'var(--color-success, #10b981)',
+                color: 'var(--color-accent)',
               }}>
                 Cambio a devolver: {lastPayment.change.toFixed(2)} €
               </div>
@@ -160,7 +151,7 @@ export function PaymentModal({
           <div
             style={{
               marginBottom: 'var(--space-4)',
-              padding: 'var(--space-4)',
+              padding: 'var(--space-3) var(--space-4)',
               borderRadius: 'var(--radius-lg)',
               border: '1px solid var(--color-border)',
               background: 'var(--color-surface-2)',
@@ -168,9 +159,9 @@ export function PaymentModal({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
               <div>
-                <div style={{ fontWeight: 700 }}>Impresion local de este equipo</div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-                  Usa QZ Tray para imprimir en una impresora instalada en este PC.
+                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>Impresión local</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                  Usa QZ Tray para imprimir en este equipo.
                 </div>
               </div>
               <button
@@ -183,16 +174,15 @@ export function PaymentModal({
               </button>
             </div>
 
-            {localPrinting.availablePrinters.length > 0 ? (
+            {localPrinting.availablePrinters.length > 0 && (
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" htmlFor="local-printer-select">Impresora detectada</label>
                 <select
                   id="local-printer-select"
                   className="form-select"
                   value={localPrinting.printerName ?? ''}
                   onChange={(event) => localPrinting.onChange(event.target.value || null)}
                 >
-                  <option value="">No usar impresion local</option>
+                  <option value="">No usar impresión local</option>
                   {localPrinting.availablePrinters.map((printer) => (
                     <option key={printer} value={printer}>
                       {printer}
@@ -200,64 +190,78 @@ export function PaymentModal({
                   ))}
                 </select>
               </div>
-            ) : (
-              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-                Pulsa en <strong>Detectar</strong> para buscar impresoras locales en este equipo.
-              </div>
-            )}
-
-            {!localPrinting.enabled && (
-              <div style={{ marginTop: 'var(--space-2)', fontSize: '0.82rem', color: 'var(--color-warning, #b45309)' }}>
-                Instala y abre QZ Tray en este equipo para habilitar la impresión local.
-              </div>
             )}
           </div>
         )}
 
         {/* Total a pagar destacado */}
         <div style={{
-          background: 'var(--color-accent-dim)',
-          border: '1px solid rgba(154, 107, 63, 0.25)',
+          background: 'var(--color-surface-2)',
+          border: '1px solid var(--color-border)',
           padding: 'var(--space-4)',
           borderRadius: 'var(--radius-lg)',
           textAlign: 'center',
           marginBottom: 'var(--space-4)'
         }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.5 }}>Importe total</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total a pagar</span>
           <div style={{ fontSize: '2.25rem', fontWeight: 800, color: 'var(--color-accent)', marginTop: 4 }}>
             {total.toFixed(2)} €
           </div>
         </div>
 
-        {/* Selector de método de pago */}
+        {/* Selector de método de pago (Botones grandes sobrios sin emoticonos) */}
         <div className="form-group" style={{ marginBottom: 'var(--space-4)' }}>
           <label className="form-label">Método de pago</label>
-          <div className="navbar__nav--switcher" style={{ display: 'flex', padding: 4, background: 'var(--color-surface-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
             <button
               type="button"
-              className={`nav-btn ${method === 'CARD' ? 'active' : ''}`}
-              style={{ flex: 1, justifyContent: 'center', padding: '8px 16px', borderRadius: 'calc(var(--radius-md) - 2px)' }}
-              onClick={() => setMethod('CARD')}
-            >
-              Tarjeta
-            </button>
-            <button
-              type="button"
-              className={`nav-btn ${method === 'CASH' ? 'active' : ''}`}
-              style={{ flex: 1, justifyContent: 'center', padding: '8px 16px', borderRadius: 'calc(var(--radius-md) - 2px)' }}
-              onClick={() => setMethod('CASH')}
+              className={`btn ${method === 'CASH' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{
+                height: 56,
+                fontSize: '1.15rem',
+                fontWeight: 700,
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                setMethod('CASH');
+                setDelivered(total.toFixed(2));
+              }}
             >
               Efectivo
+            </button>
+
+            <button
+              type="button"
+              className={`btn ${method === 'CARD' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{
+                height: 56,
+                fontSize: '1.15rem',
+                fontWeight: 700,
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                setMethod('CARD');
+              }}
+            >
+              Tarjeta
             </button>
           </div>
         </div>
 
         {/* Detalles si es Efectivo */}
         {method === 'CASH' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', animation: 'slideUp 0.15s ease' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
             <div className="form-row-2">
-              <div className="form-group">
-                <label className="form-label" htmlFor="pay-delivered">Importe entregado</label>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor="pay-delivered">Entregado</label>
                 <div style={{ position: 'relative' }}>
                   <input
                     id="pay-delivered"
@@ -266,121 +270,109 @@ export function PaymentModal({
                     className="form-input"
                     value={delivered}
                     onChange={(e) => setDelivered(e.target.value)}
+                    onFocus={() => setShowNumpad(true)}
                     placeholder="0.00"
-                    autoFocus
-                    style={{ fontSize: '1.15rem', paddingRight: '48px' }}
+                    style={{ fontSize: '1.15rem', fontWeight: 700, paddingRight: '40px', height: 48 }}
                   />
-                  {delivered && (
-                    <button
-                      type="button"
-                      onClick={() => setDelivered('')}
-                      style={{
-                        position: 'absolute',
-                        right: 28,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--color-text-muted)',
-                        fontSize: '0.9rem',
-                        cursor: 'pointer',
-                        fontWeight: 700
-                      }}
-                      title="Limpiar"
-                    >
-                      C
-                    </button>
-                  )}
                   <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', fontWeight: 600 }}>€</span>
                 </div>
               </div>
-              <div className="form-group">
-                <label className="form-label">Importe a devolver</label>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Cambio</label>
                 <div style={{
-                  background: isCashInvalid ? 'var(--color-surface-2)' : 'rgba(16, 185, 129, 0.12)',
-                  border: '1px solid ' + (isCashInvalid ? 'var(--color-border)' : 'rgba(16, 185, 129, 0.3)'),
+                  background: 'var(--color-surface-2)',
+                  border: '1px solid var(--color-border)',
                   borderRadius: 'var(--radius-md)',
-                  height: 42,
+                  height: 48,
                   display: 'flex',
                   alignItems: 'center',
-                  paddingLeft: 'var(--space-4)',
+                  paddingLeft: 'var(--space-3)',
                   fontSize: '1.15rem',
                   fontWeight: 700,
-                  color: isCashInvalid ? 'var(--color-text-muted)' : 'var(--color-success)'
+                  color: isCashInvalid ? 'var(--color-text-muted)' : 'var(--color-accent)'
                 }}>
                   {isCashInvalid ? 'Falta importe' : `${change.toFixed(2)} €`}
                 </div>
               </div>
             </div>
 
-            {/* Atajos de teclado/importes rápidos */}
-            <div>
-              <span className="form-label" style={{ display: 'block', marginBottom: 'var(--space-2)' }}>Acceso rápido</span>
-              <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => handleQuickAmount(total)}>
-                  Exacto
-                </button>
-                {[5, 10, 20, 50, 100].map((val) => {
-                  if (val <= total && val * 2 < total) return null; // Filtrar atajos muy pequeños si el total es muy alto
-                  return (
-                    <button
-                      key={val}
-                      type="button"
-                      className="btn btn-sm btn-secondary"
-                      onClick={() => handleQuickAmount(val)}
-                    >
-                      {val} €
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Botón para desplegar/ocultar teclado numérico opcional */}
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowNumpad(!showNumpad)}
+                style={{ fontSize: '0.82rem', color: 'var(--color-accent)', padding: 0 }}
+              >
+                {showNumpad ? 'Ocultar teclado' : 'Modificar importe / Billetes...'}
+              </button>
             </div>
 
-            {/* Teclado numérico táctil */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 8,
-              marginTop: 'var(--space-2)'
-            }}>
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map((key) => {
-                const isDelete = key === '⌫';
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleKeyPress(isDelete ? 'BACKSPACE' : key)}
-                    style={{
-                      height: 48,
-                      fontSize: '1.2rem',
-                      fontWeight: 700,
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: isDelete ? 'rgba(239, 68, 68, 0.08)' : 'var(--color-surface-2)',
-                      border: '1px solid var(--color-border)',
-                      color: isDelete ? 'var(--color-error)' : 'var(--color-text-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      userSelect: 'none'
-                    }}
-                  >
-                    {key}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Teclado numérico y billetes desplegables solo si showNumpad es true */}
+            {showNumpad && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-1)' }}>
+                <div>
+                  <span className="form-label" style={{ display: 'block', marginBottom: 'var(--space-1)', fontSize: '0.8rem' }}>Atajos de importe</span>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={() => handleQuickAmount(total)}
+                    >
+                      Exacto ({total.toFixed(2)} €)
+                    </button>
+                    {[5, 10, 20, 50, 100].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => handleQuickAmount(val)}
+                      >
+                        {val} €
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 6
+                }}>
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map((key) => {
+                    const isDelete = key === '⌫';
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => handleKeyPress(isDelete ? 'BACKSPACE' : key)}
+                        style={{
+                          height: 44,
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          borderRadius: 'var(--radius-md)',
+                          userSelect: 'none'
+                        }}
+                      >
+                        {key}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Acciones de confirmación */}
-        <div className="modal__actions" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+        {/* BOTONES DE CONFIRMACIÓN */}
+        <div className="modal__actions" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginTop: 'var(--space-4)' }}>
           <div style={{ display: 'flex', gap: 'var(--space-3)', width: '100%' }}>
             <button
               type="button"
               className="btn btn-secondary"
               onClick={onClose}
-              style={{ flex: 1 }}
+              style={{ flex: 1, height: 52, fontSize: '1.05rem', fontWeight: 700 }}
               disabled={isClosing}
             >
               Cancelar
@@ -390,10 +382,10 @@ export function PaymentModal({
               type="button"
               className="btn btn-pay"
               onClick={() => onConfirm(method, false, method === 'CASH' ? { delivered: deliveredNum, change } : undefined)}
-              style={{ flex: 1 }}
+              style={{ flex: 1, height: 52, fontSize: '1.05rem', fontWeight: 700 }}
               disabled={isClosing || isCashInvalid}
             >
-              Confirmar
+              Confirmar (Sin ticket)
             </button>
           </div>
 
@@ -402,9 +394,13 @@ export function PaymentModal({
             className="btn btn-primary btn-full"
             onClick={() => onConfirm(method, true, method === 'CASH' ? { delivered: deliveredNum, change } : undefined)}
             disabled={isClosing || isCashInvalid}
-            style={{ fontWeight: 700 }}
+            style={{
+              height: 56,
+              fontSize: '1.15rem',
+              fontWeight: 800,
+            }}
           >
-            {isClosing ? 'Confirmando...' : 'Confirmar e Imprimir (Verifactu)'}
+            {isClosing ? 'Emitiendo ticket...' : 'Confirmar e Imprimir (Verifactu)'}
           </button>
         </div>
       </div>

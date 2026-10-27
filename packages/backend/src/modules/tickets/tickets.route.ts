@@ -4,7 +4,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { addCashMovement, closeCashRegister, closePartialTicket, closeTicket, getCashClosurePreview, getCashClosureRaw, getCashSummary, getPreBillRaw, getTicketPreview, getTicketRaw, openCashSession, printPreBill, reprintCashClosure, reprintTicket } from './tickets.service';
+import { addCashMovement, closeCashRegister, closePartialTicket, closeTicket, getCashClosurePreview, getCashClosureRaw, getCashSummary, getPreBillRaw, getTicketPreview, getTicketRaw, openCashSession, printPreBill, rectifyTicket, reprintCashClosure, reprintTicket, resendPendingTicketsToAeat, transmitTicketRecordToAeat } from './tickets.service';
 import { canAccessVenue, requirePermission } from '../auth/guards';
 
 const CloseTicketSchema = z.object({
@@ -77,6 +77,32 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
     });
     if (!ticket) return reply.status(404).send({ error: 'Ticket no encontrado' });
     return reply.send({ data: ticket });
+  });
+
+  /** POST /api/tickets/:id/resend-aeat — Reintenta enviar un ticket a AEAT */
+  fastify.post<{ Params: { id: string } }>('/:id/resend-aeat', async (request, reply) => {
+    const ticketId = parseInt(request.params.id, 10);
+    if (!ticketId) return reply.status(400).send({ error: 'ID de ticket no válido' });
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { venueId: true },
+    });
+    if (!ticket) return reply.status(404).send({ error: 'Ticket no encontrado' });
+    if (!canAccessVenue(request, ticket.venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+
+    const result = await transmitTicketRecordToAeat(ticketId, ticket.venueId);
+    return reply.send({ data: result });
+  });
+
+  /** POST /api/tickets/resend-pending-aeat — Reintenta enviar todos los tickets pendientes o fallidos de una sede */
+  fastify.post<{ Body: { venueId: number } }>('/resend-pending-aeat', async (request, reply) => {
+    const venueId = request.body?.venueId;
+    if (!venueId) return reply.status(400).send({ error: 'venueId requerido' });
+    if (!canAccessVenue(request, venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+
+    const result = await resendPendingTicketsToAeat(venueId);
+    return reply.send({ data: result });
   });
 
   /** GET /api/tickets/cash/summary?venueId= */
@@ -212,4 +238,30 @@ export async function ticketsRoutes(fastify: FastifyInstance) {
     const data = await reprintTicket(parseInt(request.params.id, 10));
     return reply.send({ data });
   });
+
+  /** POST /api/tickets/:id/rectify — Emitir factura rectificativa */
+  fastify.post<{ Params: { id: string }; Body: { venueId: number; reason: string } }>('/:id/rectify', async (request, reply) => {
+    const ticketId = parseInt(request.params.id, 10);
+    const { venueId, reason } = request.body || {};
+
+    if (!ticketId || !venueId || !reason) {
+      return reply.status(400).send({ error: 'Faltan parámetros obligatorios (ticketId, venueId, reason)' });
+    }
+
+    if (!canAccessVenue(request, venueId)) return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+
+    try {
+      const result = await rectifyTicket({
+        ticketId,
+        venueId,
+        userId: request.user.userId,
+        reason,
+      });
+      return reply.status(201).send({ data: result });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al rectificar ticket';
+      return reply.status(400).send({ error: msg });
+    }
+  });
 }
+

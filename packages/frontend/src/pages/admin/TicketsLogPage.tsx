@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { adminApi, ticketsApi } from '../../services/api';
 import { useAppStore } from '../../store/useAppStore';
 import { printRawBase64WithQzTray } from '../../services/qzTray';
+import { exportCashClosuresPDF, exportTicketsPDF } from '../../services/pdfExport';
 import type { CashClosure, TicketPreviewData } from '../../types';
 
 interface TicketListItem {
@@ -175,6 +176,29 @@ export function TicketsLogPage() {
     }
   };
 
+  const handleRectifyTicket = async (ticket: TicketListItem) => {
+    if (!currentVenueId) return;
+    const reason = window.prompt(`¿Deseas emitir una Factura Rectificativa para el ticket ${ticket.invoiceCode}?\n\nIntroduce el motivo:`);
+    if (!reason || !reason.trim()) return;
+
+    try {
+      setLoading(true);
+      const res = await ticketsApi.rectify(ticket.id, {
+        venueId: currentVenueId,
+        reason: reason.trim(),
+      });
+      toast.success(`Factura Rectificativa ${res.rectifyingInvoiceCode} emitida correctamente`);
+      setSelectedTicket(null);
+      setTicketPreview(null);
+      await loadTickets();
+    } catch (error) {
+      console.error('[Tickets] Error al rectificar ticket:', error);
+      toast.error('No se pudo emitir la factura rectificativa');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getStatusBadge = (status: TicketListItem['aeatStatus']) => {
     switch (status) {
       case 'ACCEPTED':
@@ -208,7 +232,7 @@ export function TicketsLogPage() {
           <h1 className="admin-page-title">Histórico de facturación y cierres</h1>
           <p className="admin-page-subtitle">Consulta el histórico facturado y los cierres de caja registrados en esta sede</p>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
           <select
             className="form-select"
             value={statusFilter}
@@ -221,6 +245,31 @@ export function TicketsLogPage() {
             <option value="REJECTED">Rechazado</option>
             <option value="ERROR">Error de envío</option>
           </select>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => exportCashClosuresPDF(
+              closures.map((c) => ({
+                id: c.id,
+                periodStart: c.periodStart,
+                periodEnd: c.periodEnd,
+                ticketCount: c.ticketCount,
+                billedTotal: Number(c.billedTotal),
+                openingAmount: Number(c.openingAmount),
+                user: c.user,
+              })),
+              { billedTotal: closuresTotal, ticketCount: closures.reduce((acc, c) => acc + c.ticketCount, 0) }
+            )}
+          >
+            📄 PDF Cierres
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => exportTicketsPDF(tickets.map((t) => ({ id: t.id, invoiceCode: t.invoiceCode, total: t.total, paymentMethod: 'CASH/CARD', aeatStatus: t.aeatStatus, issuedAt: t.issuedAt ?? t.createdAt })))}
+          >
+            📄 PDF Ventas
+          </button>
         </div>
       </div>
 
@@ -509,6 +558,14 @@ export function TicketsLogPage() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
                 <button
+                  className="btn btn-secondary"
+                  onClick={() => void handleRectifyTicket(selectedTicket)}
+                  style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--color-error, #ef4444)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                >
+                  Anular / Rectificar
+                </button>
+
+                <button
                   className="btn btn-primary"
                   onClick={() => void handleReprint(selectedTicket.id)}
                   disabled={reprintingTicketId === selectedTicket.id}
@@ -527,3 +584,4 @@ export function TicketsLogPage() {
     </div>
   );
 }
+

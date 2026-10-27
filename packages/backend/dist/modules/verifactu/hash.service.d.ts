@@ -9,8 +9,8 @@ export interface HashInputFields {
     numSerieFactura: string;
     /** Fecha de expedición en formato dd-mm-yyyy */
     fechaExpedicion: string;
-    /** Tipo de factura: siempre "F1" para facturas simplificadas */
-    tipoFactura: 'F1' | 'F2' | 'F3';
+    /** Tipo de factura: "F1", "F2", "F3" o rectificativas "R1", "R2", "R3", "R4", "R5" */
+    tipoFactura: 'F1' | 'F2' | 'F3' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
     /** Cuota total de IVA con 2 decimales (ej: "2.20") */
     cuotaTotal: string;
     /** Importe total con IVA, 2 decimales (ej: "24.20") */

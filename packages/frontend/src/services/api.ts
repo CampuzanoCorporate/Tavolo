@@ -5,7 +5,7 @@
  * ============================================================
  */
 import axios from 'axios';
-import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, TicketRawData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, QuarterlyReport, TicketLogoSummary, PreBillRawData } from '../types';
+import type { AuthResponse, Category, Venue, Organisation, Printer, Table, Order, KitchenQueueItem, KitchenQueueSummaryItem, TicketPreviewData, TicketRawData, CashClosure, CashSummaryData, ProductionStation, ProductionItemStatus, LicenseRecord, LicenseStatus, LicenseStatusData, OwnerDashboardMetrics, FiscalCertificateSummary, FiscalConfig, FiscalConnectionTestResult, QuarterlyReport, TicketLogoSummary, PreBillRawData, SuperAdminOrganisation } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
@@ -39,6 +39,8 @@ export const authApi = {
   login:   (email: string, password: string) =>
     apiClient.post<AuthResponse>('/api/auth/login', { email, password }).then((r) => r.data),
   me:      () => apiClient.get('/api/auth/me').then((r) => r.data.data),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiClient.post<{ user: any }>('/api/auth/change-password', { oldPassword, newPassword }).then((r) => r.data),
 };
 
 // ── Tables ────────────────────────────────────────────────────────────────────
@@ -131,6 +133,8 @@ export const ticketsApi = {
     apiClient.post('/api/tickets/cash/movements', data).then((r) => r.data.data),
   closeCash: (data: { venueId: number; countedAmount: number; notes?: string; printerIp?: string; printerPort?: number }) =>
     apiClient.post('/api/tickets/cash/close', data).then((r) => r.data.data),
+  rectify: (ticketId: number, data: { venueId: number; reason: string }) =>
+    apiClient.post<{ data: { rectifyingTicketId: number; rectifyingInvoiceCode: string; originalInvoiceCode: string; total: number } }>(`/api/tickets/${ticketId}/rectify`, data).then((r) => r.data.data),
 };
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
@@ -205,7 +209,22 @@ export const adminApi = {
     apiClient.get(`/api/admin/venues/${venueId}/tickets`, { params }).then((r) => r.data),
   getCashClosures: (venueId: number) =>
     apiClient.get<{ data: CashClosure[]; totals: { billedTotal: number; ticketCount: number } }>(`/api/admin/venues/${venueId}/cash-closures`).then((r) => r.data),
+
+  // Configuración Veri*factu / AEAT
+  getFiscalConfig: () =>
+    apiClient.get<{ data: FiscalConfig & { endpointUrls: { TEST: string; PRODUCTION: string } } }>('/api/admin/fiscal/config').then((r) => r.data.data),
+  saveFiscalConfig: (data: Partial<Omit<FiscalConfig, 'id' | 'organisationId' | 'createdAt' | 'updatedAt' | 'endpointUrls'>>) =>
+    apiClient.put<{ data: FiscalConfig }>('/api/admin/fiscal/config', data).then((r) => r.data.data),
+  testAeatConnection: () =>
+    apiClient.post<{ data: FiscalConnectionTestResult }>('/api/admin/fiscal/test-aeat').then((r) => r.data.data),
+
+  // Reenvío de tickets
+  resendPendingTickets: (venueId?: number) =>
+    apiClient.post<{ data: { queued: number } }>('/api/tickets/aeat/resend-pending', { venueId }).then((r) => r.data.data),
+  resendTicket: (ticketId: number) =>
+    apiClient.post<{ data: { ok: boolean } }>(`/api/tickets/${ticketId}/aeat/transmit`).then((r) => r.data.data),
 };
+
 
 export const printersApi = {
   openDrawer: (venueId: number) =>
@@ -237,6 +256,18 @@ export const licensingApi = {
     }).then((r) => r.data.data),
   updateLicenseStatus: (masterKey: string, id: number, status: LicenseStatus) =>
     apiClient.patch<{ data: LicenseRecord }>(`/api/licensing/center/licenses/${id}/status`, { status }, {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  getSuperAdminOrganisations: (masterKey: string) =>
+    apiClient.get<{ data: SuperAdminOrganisation[] }>('/api/licensing/center/organisations', {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  updateOrgFiscalConfig: (masterKey: string, organisationId: number, data: Partial<Omit<FiscalConfig, 'id' | 'organisationId' | 'createdAt' | 'updatedAt'>>) =>
+    apiClient.put<{ data: FiscalConfig }>(`/api/licensing/center/organisations/${organisationId}/fiscal`, data, {
+      headers: { 'X-License-Master-Key': masterKey },
+    }).then((r) => r.data.data),
+  testOrgAeatConnection: (masterKey: string, organisationId: number) =>
+    apiClient.post<{ data: FiscalConnectionTestResult }>(`/api/licensing/center/organisations/${organisationId}/test-aeat`, {}, {
       headers: { 'X-License-Master-Key': masterKey },
     }).then((r) => r.data.data),
 };

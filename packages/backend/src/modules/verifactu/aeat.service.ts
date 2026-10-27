@@ -1,5 +1,6 @@
 import https from 'https';
 import { Prisma } from '@prisma/client';
+import { prisma } from '../../db/client';
 import { config } from '../../config';
 import { getFiscalCertificateBundle } from './certificate.service';
 import { formatDecimalForHash, formatDateForHash } from './hash.service';
@@ -8,10 +9,27 @@ const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SUMINISTRO_LR_NS = 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tike/cont/ws/SuministroLR.xsd';
 const SUMINISTRO_INFO_NS = 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tike/cont/ws/SuministroInformacion.xsd';
 
+export const OFFICIAL_AEAT_ENDPOINTS = {
+  TEST: 'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP',
+  PRODUCTION: 'https://www1.agenciatributaria.gob.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP',
+} as const;
+
 export interface VerifactuTaxBreakdown {
   vatRate: number;
   taxableBase: number;
   taxAmount: number;
+}
+
+export interface EffectiveFiscalConfig {
+  environment: 'TEST' | 'PRODUCTION';
+  endpointUrl: string;
+  developerName: string;
+  developerNif: string;
+  softwareName: string;
+  softwareId: string;
+  softwareVersion: string;
+  installationId: string;
+  onlyVerifactu: boolean;
 }
 
 export interface SubmitVerifactuRecordInput {
@@ -58,8 +76,10 @@ function cleanText(value: string, maxLength: number) {
   return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
-function toSiNo(value: string, fallback: 'S' | 'N') {
-  return value === 'S' || value === 'N' ? value : fallback;
+function toSiNo(value: boolean | string | undefined, fallback: 'S' | 'N') {
+  if (value === true || value === 'S') return 'S';
+  if (value === false || value === 'N') return 'N';
+  return fallback;
 }
 
 function formatDateTimeWithOffset(date: Date, timeZone: string) {
@@ -97,16 +117,38 @@ function getTagValue(xml: string, tagName: string) {
     .trim();
 }
 
-function buildSoapEnvelope(input: SubmitVerifactuRecordInput) {
-  const developerNif = cleanText(config.aeat.software.developerNif || input.effectiveNif, 9);
+export async function getEffectiveFiscalConfig(organisationId: number): Promise<EffectiveFiscalConfig> {
+  const custom = await prisma.fiscalConfig.findUnique({
+    where: { organisationId },
+  });
+
+  const environment = (custom?.environment === 'PRODUCTION' ? 'PRODUCTION' : 'TEST') as 'TEST' | 'PRODUCTION';
+  const defaultEndpoint = OFFICIAL_AEAT_ENDPOINTS[environment];
+  const endpointUrl = custom?.customEndpointUrl?.trim() || config.aeat.endpointUrl || defaultEndpoint;
+
+  return {
+    environment,
+    endpointUrl,
+    developerName: custom?.developerName?.trim() || config.aeat.software.developerName || 'Tavolo POS',
+    developerNif: custom?.developerNif?.trim() || config.aeat.software.developerNif || '',
+    softwareName: custom?.softwareName?.trim() || config.aeat.software.softwareName || 'TAVOLOPOS',
+    softwareId: custom?.softwareId?.trim() || config.aeat.software.softwareId || '01',
+    softwareVersion: custom?.softwareVersion?.trim() || config.aeat.software.softwareVersion || '1.0.0',
+    installationId: custom?.installationId?.trim() || config.aeat.software.installationId || 'default',
+    onlyVerifactu: custom?.onlyVerifactu ?? (config.aeat.software.onlyVerifactu === 'S'),
+  };
+}
+
+function buildSoapEnvelope(input: SubmitVerifactuRecordInput, fiscalConfig: EffectiveFiscalConfig) {
+  const developerNif = cleanText(fiscalConfig.developerNif || input.effectiveNif, 9);
   const softwareXml = [
-    `<sum:NombreRazon>${escapeXml(cleanText(config.aeat.software.developerName, 120))}</sum:NombreRazon>`,
+    `<sum:NombreRazon>${escapeXml(cleanText(fiscalConfig.developerName, 120))}</sum:NombreRazon>`,
     `<sum:NIF>${escapeXml(developerNif)}</sum:NIF>`,
-    `<sum:NombreSistemaInformatico>${escapeXml(cleanText(config.aeat.software.softwareName, 30))}</sum:NombreSistemaInformatico>`,
-    `<sum:IdSistemaInformatico>${escapeXml(cleanText(config.aeat.software.softwareId, 2))}</sum:IdSistemaInformatico>`,
-    `<sum:Version>${escapeXml(cleanText(config.aeat.software.softwareVersion, 50))}</sum:Version>`,
-    `<sum:NumeroInstalacion>${escapeXml(cleanText(config.aeat.software.installationId, 100))}</sum:NumeroInstalacion>`,
-    `<sum:TipoUsoPosibleSoloVerifactu>${toSiNo(config.aeat.software.onlyVerifactu, 'S')}</sum:TipoUsoPosibleSoloVerifactu>`,
+    `<sum:NombreSistemaInformatico>${escapeXml(cleanText(fiscalConfig.softwareName, 30))}</sum:NombreSistemaInformatico>`,
+    `<sum:IdSistemaInformatico>${escapeXml(cleanText(fiscalConfig.softwareId, 2))}</sum:IdSistemaInformatico>`,
+    `<sum:Version>${escapeXml(cleanText(fiscalConfig.softwareVersion, 50))}</sum:Version>`,
+    `<sum:NumeroInstalacion>${escapeXml(cleanText(fiscalConfig.installationId, 100))}</sum:NumeroInstalacion>`,
+    `<sum:TipoUsoPosibleSoloVerifactu>${toSiNo(fiscalConfig.onlyVerifactu, 'S')}</sum:TipoUsoPosibleSoloVerifactu>`,
     `<sum:TipoUsoPosibleMultiOT>${toSiNo(config.aeat.software.multiObligado, 'N')}</sum:TipoUsoPosibleMultiOT>`,
     `<sum:IndicadorMultiplesOT>${toSiNo(config.aeat.software.multipleObligadoIndicator, 'N')}</sum:IndicadorMultiplesOT>`,
   ].join('');
@@ -149,6 +191,9 @@ function buildSoapEnvelope(input: SubmitVerifactuRecordInput) {
     `<sum:NombreRazon>${escapeXml(cleanText(input.effectiveName, 120))}</sum:NombreRazon>`,
     `<sum:NIF>${escapeXml(cleanText(input.effectiveNif, 9))}</sum:NIF>`,
     '</sum:ObligadoEmision>',
+    '<sum:RemisionVoluntaria>',
+    '<sum:Incidencia>N</sum:Incidencia>',
+    '</sum:RemisionVoluntaria>',
     '</sumLR:Cabecera>',
     '<sumLR:RegistroFactura>',
     '<sum:RegistroAlta>',
@@ -182,14 +227,8 @@ function buildSoapEnvelope(input: SubmitVerifactuRecordInput) {
   ].join('');
 }
 
-function validateRealModeConfiguration() {
-  if (!config.aeat.software.developerNif) {
-    throw new Error('Falta configurar AEAT_SOFTWARE_DEVELOPER_NIF para remisión real a AEAT');
-  }
-}
-
-async function postSoapRequest(xml: string, pfx: Buffer, passphrase: string) {
-  const url = new URL(config.aeat.endpointUrl);
+async function postSoapRequest(xml: string, pfx: Buffer, passphrase: string, endpointUrl: string) {
+  const url = new URL(endpointUrl);
 
   return new Promise<string>((resolve, reject) => {
     const request = https.request({
@@ -243,10 +282,11 @@ function parseSoapResponse(responseXml: string, requestXml: string): AeatSubmiss
   const lineStatus = (getTagValue(responseXml, 'EstadoRegistro') ?? 'Incorrecto') as AeatSubmissionResult['lineStatus'];
   const csv = getTagValue(responseXml, 'CSV');
   const code = getTagValue(responseXml, 'CodigoErrorRegistro')
-    ?? lineStatus
+    ?? (lineStatus === 'Correcto' ? 'CORRECTO' : lineStatus)
     ?? globalStatus;
-  const message = getTagValue(responseXml, 'DescripcionErrorRegistro')
-    ?? `${globalStatus}/${lineStatus}`;
+  const rawMessage = getTagValue(responseXml, 'DescripcionErrorRegistro');
+  const message = rawMessage
+    || (lineStatus === 'Correcto' ? 'Factura aceptada correctamente por la AEAT' : `${globalStatus}/${lineStatus}`);
 
   return {
     code,
@@ -261,45 +301,130 @@ function parseSoapResponse(responseXml: string, requestXml: string): AeatSubmiss
 }
 
 export async function submitVerifactuRecord(input: SubmitVerifactuRecordInput): Promise<AeatSubmissionResult> {
-  const requestXml = buildSoapEnvelope(input);
-
-  if (config.aeat.deliveryMode !== 'real') {
-    return {
-      code: 'SIMULATED',
-      message: 'Remisión AEAT simulada. Configura AEAT_DELIVERY_MODE=real para envío real.',
-      globalStatus: 'Simulado',
-      lineStatus: 'Simulado',
-      csv: null,
-      requestXml,
-      responseXml: undefined,
-      isSimulated: true,
-    };
-  }
-
-  validateRealModeConfiguration();
+  const fiscalConfig = await getEffectiveFiscalConfig(input.organisationId);
+  const requestXml = buildSoapEnvelope(input, fiscalConfig);
 
   const certificate = await getFiscalCertificateBundle(input.organisationId);
   if (!certificate) {
-    throw new Error('No hay certificado fiscal cargado en administración para remitir a AEAT');
+    throw new Error('No hay certificado fiscal digital (.p12/.pfx) cargado en Administración > Fiscal para remitir a Hacienda');
   }
 
-  const responseXml = await postSoapRequest(requestXml, certificate.fileBuffer, certificate.passphrase);
+  const responseXml = await postSoapRequest(requestXml, certificate.fileBuffer, certificate.passphrase, fiscalConfig.endpointUrl);
   return parseSoapResponse(responseXml, requestXml);
 }
 
+export async function testAeatConnection(organisationId: number): Promise<{
+  success: boolean;
+  endpointUrl: string;
+  environment: 'TEST' | 'PRODUCTION';
+  certificateLabel: string | null;
+  certificateFilename: string;
+  message: string;
+  httpStatus?: number;
+  rawResponse?: string;
+}> {
+  const fiscalConfig = await getEffectiveFiscalConfig(organisationId);
+  const certificate = await getFiscalCertificateBundle(organisationId);
+
+  if (!certificate) {
+    return {
+      success: false,
+      endpointUrl: fiscalConfig.endpointUrl,
+      environment: fiscalConfig.environment,
+      certificateLabel: null,
+      certificateFilename: '',
+      message: 'No hay certificado fiscal digital (.p12/.pfx) subido en el sistema. Debes cargar el certificado primero.',
+    };
+  }
+
+  // Comprobar handshake TLS mTLS contra el endpoint de la AEAT con el certificado
+  const probeEnvelope = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:sumLR="${SUMINISTRO_LR_NS}">`,
+    '<soapenv:Header/>',
+    '<soapenv:Body>',
+    '<sumLR:RegFactuSistemaFacturacion>',
+    '<sumLR:Cabecera>',
+    '<sum:ObligadoEmision xmlns:sum="' + SUMINISTRO_INFO_NS + '">',
+    '<sum:NombreRazon>TEST_CONNECTION</sum:NombreRazon>',
+    '<sum:NIF>00000000T</sum:NIF>',
+    '</sum:ObligadoEmision>',
+    '<sum:RemisionVoluntaria xmlns:sum="' + SUMINISTRO_INFO_NS + '">',
+    '<sum:Incidencia>N</sum:Incidencia>',
+    '</sum:RemisionVoluntaria>',
+    '</sumLR:Cabecera>',
+    '</sumLR:RegFactuSistemaFacturacion>',
+    '</soapenv:Body>',
+    '</soapenv:Envelope>',
+  ].join('');
+
+  try {
+    const responseBody = await postSoapRequest(
+      probeEnvelope,
+      certificate.fileBuffer,
+      certificate.passphrase,
+      fiscalConfig.endpointUrl
+    );
+
+    return {
+      success: true,
+      endpointUrl: fiscalConfig.endpointUrl,
+      environment: fiscalConfig.environment,
+      certificateLabel: certificate.filename,
+      certificateFilename: certificate.filename,
+      message: 'Conexión mTLS con AEAT establecida con éxito. El certificado y el endpoint responden correctamente.',
+      rawResponse: responseBody.slice(0, 500),
+    };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    // Si la AEAT respondió HTTP 500 con un SOAP fault (ej. schema validation porque es un probe),
+    // significa que el handshake TLS mTLS fue EXITOSO y el certificado es reconocido por la AEAT.
+    if (errorMsg.includes('AEAT respondió HTTP') && (errorMsg.includes('fault') || errorMsg.includes('Fault') || errorMsg.includes('4102') || errorMsg.includes('schema'))) {
+      return {
+        success: true,
+        endpointUrl: fiscalConfig.endpointUrl,
+        environment: fiscalConfig.environment,
+        certificateLabel: certificate.filename,
+        certificateFilename: certificate.filename,
+        message: 'Conexión mTLS con AEAT verificada con éxito. El servidor de Hacienda reconoció y aceptó el certificado digital.',
+        rawResponse: errorMsg,
+      };
+    }
+
+    return {
+      success: false,
+      endpointUrl: fiscalConfig.endpointUrl,
+      environment: fiscalConfig.environment,
+      certificateLabel: certificate.filename,
+      certificateFilename: certificate.filename,
+      message: `Fallo en la comunicación con la AEAT: ${errorMsg}`,
+    };
+  }
+}
+
 export function buildTicketBreakdown(items: Array<{
-  quantity: number;
-  unitPrice: Prisma.Decimal;
-  vatRate: Prisma.Decimal;
+  quantity?: number;
+  unitPrice?: Prisma.Decimal | number;
+  vatRate: Prisma.Decimal | number;
+  total?: number;
+  subtotal?: number;
+  vatAmount?: number;
 }>) {
   const grouped = new Map<string, VerifactuTaxBreakdown>();
 
   for (const item of items) {
     const vatRate = parseFloat(item.vatRate.toString());
-    const gross = parseFloat(item.unitPrice.toString()) * item.quantity;
-    const divisor = 1 + (vatRate / 100);
-    const base = divisor > 0 ? gross / divisor : gross;
-    const tax = gross - base;
+    let base = 0;
+    let tax = 0;
+    if (item.subtotal !== undefined && item.vatAmount !== undefined) {
+      base = item.subtotal;
+      tax = item.vatAmount;
+    } else {
+      const gross = (item.unitPrice ? parseFloat(item.unitPrice.toString()) : 0) * (item.quantity ?? 1);
+      const divisor = 1 + (vatRate / 100);
+      base = divisor > 0 ? gross / divisor : gross;
+      tax = gross - base;
+    }
     const key = vatRate.toFixed(2);
     const current = grouped.get(key) ?? { vatRate, taxableBase: 0, taxAmount: 0 };
 

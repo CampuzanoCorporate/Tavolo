@@ -69,6 +69,32 @@ async function ticketsRoutes(fastify) {
             return reply.status(404).send({ error: 'Ticket no encontrado' });
         return reply.send({ data: ticket });
     });
+    /** POST /api/tickets/:id/resend-aeat — Reintenta enviar un ticket a AEAT */
+    fastify.post('/:id/resend-aeat', async (request, reply) => {
+        const ticketId = parseInt(request.params.id, 10);
+        if (!ticketId)
+            return reply.status(400).send({ error: 'ID de ticket no válido' });
+        const ticket = await client_1.prisma.ticket.findUnique({
+            where: { id: ticketId },
+            select: { venueId: true },
+        });
+        if (!ticket)
+            return reply.status(404).send({ error: 'Ticket no encontrado' });
+        if (!(0, guards_1.canAccessVenue)(request, ticket.venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        const result = await (0, tickets_service_1.transmitTicketRecordToAeat)(ticketId, ticket.venueId);
+        return reply.send({ data: result });
+    });
+    /** POST /api/tickets/resend-pending-aeat — Reintenta enviar todos los tickets pendientes o fallidos de una sede */
+    fastify.post('/resend-pending-aeat', async (request, reply) => {
+        const venueId = request.body?.venueId;
+        if (!venueId)
+            return reply.status(400).send({ error: 'venueId requerido' });
+        if (!(0, guards_1.canAccessVenue)(request, venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        const result = await (0, tickets_service_1.resendPendingTicketsToAeat)(venueId);
+        return reply.send({ data: result });
+    });
     /** GET /api/tickets/cash/summary?venueId= */
     fastify.get('/cash/summary', async (request, reply) => {
         const venueId = parseInt(request.query.venueId ?? '0', 10);
@@ -155,8 +181,15 @@ async function ticketsRoutes(fastify) {
             return reply.status(404).send({ error: 'Mesa no encontrada' });
         if (!(0, guards_1.canAccessVenue)(request, table.venueId))
             return reply.status(403).send({ error: 'Sin acceso a esta sede' });
-        const data = await (0, tickets_service_1.getPreBillRaw)(tableId);
-        return reply.send({ data });
+        try {
+            const data = await (0, tickets_service_1.getPreBillRaw)(tableId);
+            return reply.send({ data });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'No se pudo generar el pre-ticket';
+            request.log.error({ err: error, tableId }, 'Error generando RAW de pre-ticket');
+            return reply.status(400).send({ statusCode: 400, code: 'PREBILL_ERROR', message });
+        }
     });
     fastify.post('/prebills/:tableId/reprint', async (request, reply) => {
         const tableId = parseInt(request.params.tableId, 10);
@@ -168,8 +201,15 @@ async function ticketsRoutes(fastify) {
             return reply.status(404).send({ error: 'Mesa no encontrada' });
         if (!(0, guards_1.canAccessVenue)(request, table.venueId))
             return reply.status(403).send({ error: 'Sin acceso a esta sede' });
-        const data = await (0, tickets_service_1.printPreBill)(tableId);
-        return reply.send({ data });
+        try {
+            const data = await (0, tickets_service_1.printPreBill)(tableId);
+            return reply.send({ data });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'No se pudo imprimir el pre-ticket';
+            request.log.error({ err: error, tableId }, 'Error imprimiendo pre-ticket');
+            return reply.status(400).send({ statusCode: 400, code: 'PREBILL_ERROR', message });
+        }
     });
     /** GET /api/tickets/:id/preview */
     fastify.get('/:id/preview', async (request, reply) => {
@@ -187,6 +227,29 @@ async function ticketsRoutes(fastify) {
             return;
         const data = await (0, tickets_service_1.reprintTicket)(parseInt(request.params.id, 10));
         return reply.send({ data });
+    });
+    /** POST /api/tickets/:id/rectify — Emitir factura rectificativa */
+    fastify.post('/:id/rectify', async (request, reply) => {
+        const ticketId = parseInt(request.params.id, 10);
+        const { venueId, reason } = request.body || {};
+        if (!ticketId || !venueId || !reason) {
+            return reply.status(400).send({ error: 'Faltan parámetros obligatorios (ticketId, venueId, reason)' });
+        }
+        if (!(0, guards_1.canAccessVenue)(request, venueId))
+            return reply.status(403).send({ error: 'Sin acceso a esta sede' });
+        try {
+            const result = await (0, tickets_service_1.rectifyTicket)({
+                ticketId,
+                venueId,
+                userId: request.user.userId,
+                reason,
+            });
+            return reply.status(201).send({ data: result });
+        }
+        catch (error) {
+            const msg = error instanceof Error ? error.message : 'Error al rectificar ticket';
+            return reply.status(400).send({ error: msg });
+        }
     });
 }
 //# sourceMappingURL=tickets.route.js.map

@@ -30,6 +30,7 @@ export declare function getUserProfile(userId: number): Promise<{
     name: string;
     role: import(".prisma/client").$Enums.Role;
     permissions: string[];
+    mustChangePassword: boolean;
     isActive: boolean;
     createdAt: Date;
     venueUsers: ({
@@ -44,4 +45,17 @@ export declare function getUserProfile(userId: number): Promise<{
         venueId: number;
     })[];
 } | null>;
+export declare function changeUserPassword(userId: number, oldPass: string, newPass: string): Promise<{
+    id: number;
+    email: string;
+    name: string;
+    role: import(".prisma/client").$Enums.Role;
+    permissions: string[];
+    password: string;
+    mustChangePassword: boolean;
+    organisationId: number;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+}>;
 //# sourceMappingURL=auth.service.d.ts.map

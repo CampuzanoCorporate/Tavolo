@@ -7,6 +7,7 @@ exports.hashPassword = hashPassword;
 exports.verifyPassword = verifyPassword;
 exports.loginUser = loginUser;
 exports.getUserProfile = getUserProfile;
+exports.changeUserPassword = changeUserPassword;
 /**
  * ============================================================
  * MÓDULO AUTH — Servicio de Autenticación
@@ -87,6 +88,7 @@ async function getUserProfile(userId) {
             email: true,
             role: true,
             permissions: true,
+            mustChangePassword: true,
             isActive: true,
             createdAt: true,
             organisation: {
@@ -97,6 +99,24 @@ async function getUserProfile(userId) {
                     venue: { select: { id: true, name: true, slug: true, isActive: true } },
                 },
             },
+        },
+    });
+}
+async function changeUserPassword(userId, oldPass, newPass) {
+    const user = await client_1.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        throw Object.assign(new Error('Usuario no encontrado'), { statusCode: 404 });
+    }
+    const valid = await verifyPassword(oldPass, user.password);
+    if (!valid) {
+        throw Object.assign(new Error('La contraseña actual es incorrecta'), { statusCode: 400 });
+    }
+    const newHash = await hashPassword(newPass);
+    return client_1.prisma.user.update({
+        where: { id: userId },
+        data: {
+            password: newHash,
+            mustChangePassword: false,
         },
     });
 }

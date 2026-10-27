@@ -15,7 +15,7 @@ import {
   formatDateForHash,
   EMPTY_PREVIOUS_HASH,
 } from '../verifactu/hash.service';
-import { buildTicketBreakdown, submitVerifactuRecord } from '../verifactu/aeat.service';
+import { buildTicketBreakdown, getEffectiveFiscalConfig, submitVerifactuRecord } from '../verifactu/aeat.service';
 import { generateVerifactuQrBase64 } from '../verifactu/qr.service';
 import { buildCashClosureBuffer, buildCashClosurePreviewText, buildTicketBuffer, buildTicketPreviewText, sendToPrinter } from '../printing/printer.service';
 import { config } from '../../config';
@@ -473,6 +473,20 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
       if (!isMissingCashTables(error)) throw error;
     }
 
+    // Descuento de stock si el producto tiene control de inventario activado
+    for (const item of order.items) {
+      if (item.product && item.product.isStockControlEnabled) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
+            stockQuantity: {
+              decrement: item.quantity,
+            },
+          },
+        });
+      }
+    }
+
     await tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.CLOSED } });
     await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.FREE } });
 
@@ -492,6 +506,7 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
   // ── 6. QR de cotejo Veri*factu ────────────────────────────────────────────
   let qrBase64: string | undefined;
   try {
+    const fiscalConfig = await getEffectiveFiscalConfig(venue.organisationId);
     const pad = (n: number) => String(n).padStart(2, '0');
     const d = ticket.issuedAt;
     const fechaStr = `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
@@ -503,13 +518,13 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
         importe: formatDecimalForHash(total),
         idioma: 'es',
       },
-      config.server.isDev ? 'preproduction' : 'production'
+      fiscalConfig.environment === 'PRODUCTION' ? 'production' : 'preproduction'
     );
   } catch (e) {
     console.warn('[Tickets] Error generando QR:', e);
   }
 
-  // ── 7. Envío asíncrono a AEAT ─────────────────────────────────────────────
+  // ── 7. Envío asíncrono a AEAT (Remisión real Veri*factu) ────────────────────
   const aeatBreakdown = buildTicketBreakdown(order.items);
 
   submitVerifactuRecord({
@@ -534,10 +549,11 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
     refExternal: `ticket-${ticket.id}`,
   })
     .then(async (r) => {
+      const isRejected = r.lineStatus === 'Incorrecto' || r.globalStatus === 'Incorrecto';
       await prisma.ticket.update({
         where: { id: ticket.id },
         data: {
-          aeatStatus: r.lineStatus === 'Incorrecto' ? 'REJECTED' : (r.isSimulated ? 'SENT' : 'ACCEPTED'),
+          aeatStatus: isRejected ? 'REJECTED' : 'ACCEPTED',
           aeatSentAt: new Date(),
           aeatResponseCode: r.code,
           aeatResponseMsg: r.message,
@@ -547,13 +563,18 @@ export async function closeTicket(input: CloseTicketInput): Promise<CloseTicketR
             csv: r.csv ?? null,
             globalStatus: r.globalStatus,
             lineStatus: r.lineStatus,
-            simulated: r.isSimulated,
           }),
         },
       });
     })
     .catch(async (e) => {
-      await prisma.ticket.update({ where: { id: ticket.id }, data: { aeatStatus: 'ERROR', aeatResponseMsg: e instanceof Error ? e.message : 'Error' } });
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          aeatStatus: 'ERROR',
+          aeatResponseMsg: e instanceof Error ? e.message : 'Error de remisión a AEAT',
+        },
+      });
     });
 
   // ── 8. Impresión TCP ESC/POS ──────────────────────────────────────────────
@@ -1050,7 +1071,9 @@ export async function getCashSummary(venueId: number): Promise<CashSummaryResult
     .filter((ticket) => ticket.paymentMethod === PaymentMethod.CARD)
     .reduce((sum, ticket) => sum + Number(ticket.total), 0);
   const vatTotal = tickets.reduce((sum, ticket) => sum + Number(ticket.vatAmount), 0);
-  const expectedAmount = Math.round((openingAmount + billedTotal + manualInTotal - manualOutTotal) * 100) / 100;
+  // La caja física solo debe incluir ventas cobradas en efectivo. Las ventas
+  // con tarjeta forman parte de la facturación, pero no del arqueo de efectivo.
+  const expectedAmount = Math.round((openingAmount + cashSalesTotal + manualInTotal - manualOutTotal) * 100) / 100;
 
   return {
     activeSession: activeSession
@@ -1307,5 +1330,306 @@ export async function closeCashRegister(input: {
     preview: closurePreview,
     rawBase64: closureBuffer.toString('base64'),
     printed,
+  };
+}
+
+/**
+ * Reenvía un ticket específico a la AEAT (para tickets en estado ERROR o PENDING).
+ */
+export async function transmitTicketRecordToAeat(ticketId: number, venueId?: number) {
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: {
+      venue: {
+        include: { organisation: true },
+      },
+      order: {
+        include: {
+          items: {
+            include: { product: true },
+          },
+          table: true,
+        },
+      },
+    },
+  });
+
+  if (!ticket) {
+    throw new Error(`Ticket #${ticketId} no encontrado`);
+  }
+
+  if (venueId && ticket.venueId !== venueId) {
+    throw new Error(`El ticket #${ticketId} no pertenece a esta sede`);
+  }
+
+  const effectiveNif = ticket.businessNif;
+  const effectiveName = ticket.businessName;
+  const aeatBreakdown = buildTicketBreakdown(ticket.order.items);
+
+  let previousRecord: { invoiceCode: string; issuedAt: Date; hash: string } | null = null;
+  if (ticket.previousInvoiceCode && ticket.hashPrevious && ticket.hashPrevious !== EMPTY_PREVIOUS_HASH) {
+    const prevTicket = await prisma.ticket.findFirst({
+      where: { venueId: ticket.venueId, invoiceCode: ticket.previousInvoiceCode },
+      select: { issuedAt: true, hashSelf: true, invoiceCode: true },
+    });
+    if (prevTicket) {
+      previousRecord = {
+        invoiceCode: prevTicket.invoiceCode,
+        issuedAt: prevTicket.issuedAt,
+        hash: prevTicket.hashSelf,
+      };
+    }
+  }
+
+  try {
+    const r = await submitVerifactuRecord({
+      organisationId: ticket.venue.organisationId,
+      invoiceCode: ticket.invoiceCode,
+      issuedAt: ticket.issuedAt,
+      effectiveNif,
+      effectiveName,
+      description: `Ticket TPV mesa ${ticket.order.table?.number ?? 'Caja'}`,
+      invoiceKind: 'F2',
+      total: parseFloat(ticket.total.toString()),
+      vatAmount: parseFloat(ticket.vatAmount.toString()),
+      hashSelf: ticket.hashSelf,
+      previousRecord,
+      breakdown: aeatBreakdown,
+      refExternal: `ticket-${ticket.id}`,
+    });
+
+    const isRejected = r.lineStatus === 'Incorrecto' || r.globalStatus === 'Incorrecto';
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        aeatStatus: isRejected ? 'REJECTED' : 'ACCEPTED',
+        aeatSentAt: new Date(),
+        aeatResponseCode: r.code,
+        aeatResponseMsg: r.message,
+        aeatPayloadJson: JSON.stringify({
+          requestXml: r.requestXml,
+          responseXml: r.responseXml ?? null,
+          csv: r.csv ?? null,
+          globalStatus: r.globalStatus,
+          lineStatus: r.lineStatus,
+        }),
+      },
+    });
+
+    return { success: !isRejected, ticket: updated, result: r };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Error desconocido al remitir a AEAT';
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        aeatStatus: 'ERROR',
+        aeatResponseMsg: errorMsg,
+      },
+    });
+    return { success: false, ticket: updated, error: errorMsg };
+  }
+}
+
+/**
+ * Reenvía secuencialmente a la AEAT todos los tickets de una sede que están en estado ERROR o PENDING.
+ */
+export async function resendPendingTicketsToAeat(venueId: number) {
+  const pendingTickets = await prisma.ticket.findMany({
+    where: {
+      venueId,
+      aeatStatus: { in: ['PENDING', 'ERROR'] },
+    },
+    orderBy: { invoiceNumber: 'asc' },
+    select: { id: true, invoiceCode: true },
+  });
+
+  const results: Array<{ ticketId: number; invoiceCode: string; success: boolean; message: string }> = [];
+
+  for (const t of pendingTickets) {
+    const res = await transmitTicketRecordToAeat(t.id, venueId);
+    results.push({
+      ticketId: t.id,
+      invoiceCode: t.invoiceCode,
+      success: res.success,
+      message: res.success ? (res.result?.message ?? 'Aceptado') : (res.error ?? res.result?.message ?? 'Error'),
+    });
+  }
+
+  return {
+    total: pendingTickets.length,
+    successful: results.filter((r) => r.success).length,
+    failed: results.filter((r) => !r.success).length,
+    results,
+  };
+}
+
+export interface RectifyTicketInput {
+  ticketId: number;
+  userId: number;
+  venueId: number;
+  reason: string;
+}
+
+export interface RectifyTicketResult {
+  rectifyingTicketId: number;
+  rectifyingInvoiceCode: string;
+  originalInvoiceCode: string;
+  total: number;
+}
+
+export async function rectifyTicket(input: RectifyTicketInput): Promise<RectifyTicketResult> {
+  const { ticketId, userId, venueId, reason } = input;
+
+  const originalTicket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: {
+      order: {
+        include: {
+          items: { include: { product: true } },
+          table: true,
+        },
+      },
+      venue: { include: { organisation: true } },
+    },
+  });
+
+  if (!originalTicket) throw new Error(`Ticket #${ticketId} no encontrado`);
+  if (originalTicket.venueId !== venueId) throw new Error(`Ticket #${ticketId} no pertenece a esta sede`);
+  if (originalTicket.isRectified) throw new Error(`El ticket #${ticketId} ya ha sido rectificado previamente`);
+
+  const venue = originalTicket.venue;
+  const effectiveNif = venue.useOrgNif ? venue.organisation.nif : (venue.nifOverride ?? venue.organisation.nif);
+  const effectiveName = venue.useOrgNif ? venue.organisation.name : (venue.nameOverride ?? venue.organisation.name);
+  const effectiveAddress = venue.address ?? venue.organisation.address ?? '';
+
+  const rectSeries = `R-${venue.invoiceSeries}`;
+  const total = -Math.abs(parseFloat(originalTicket.total.toString()));
+  const subtotal = -Math.abs(parseFloat(originalTicket.subtotal.toString()));
+  const vatAmount = -Math.abs(parseFloat(originalTicket.vatAmount.toString()));
+
+  const ticketResult = await prisma.$transaction(async (tx) => {
+    // 1. Marcar el ticket original como rectificado
+    await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        isRectified: true,
+        rectificationReason: reason,
+      },
+    });
+
+    // 2. Obtener correlativo de serie rectificativa
+    const lastTickets = await tx.$queryRaw<Array<{
+      invoiceNumber: number;
+      invoiceCode: string;
+      hashSelf: string;
+      issuedAt: Date;
+    }>>`
+      SELECT "invoiceNumber", "invoiceCode", "hashSelf", "issuedAt"
+      FROM "tickets"
+      WHERE "venueId" = ${venueId} AND "invoiceSeries" = ${rectSeries}
+      ORDER BY "invoiceNumber" DESC
+      LIMIT 1
+      FOR UPDATE
+    `;
+
+    const last = lastTickets[0];
+    const nextNumber = last ? last.invoiceNumber + 1 : 1;
+    const year = new Date().getFullYear();
+    const invoiceCode = `${rectSeries}-${year}-${String(nextNumber).padStart(6, '0')}`;
+    const previousHash = last ? last.hashSelf : EMPTY_PREVIOUS_HASH;
+    const issuedAt = new Date();
+
+    const hashSelf = computeVerifactuHash({
+      idEmisorFactura: effectiveNif,
+      numSerieFactura: invoiceCode,
+      fechaExpedicion: formatDateForHash(issuedAt),
+      tipoFactura: 'R1',
+      cuotaTotal: formatDecimalForHash(vatAmount),
+      importeTotal: formatDecimalForHash(total),
+      huellaAnterior: previousHash,
+    });
+
+    // 3. Crear una order duplicada de anulación
+    const rectOrder = await tx.order.create({
+      data: {
+        venueId,
+        tableId: originalTicket.order.tableId,
+        userId,
+        status: OrderStatus.CLOSED,
+        notes: `Factura Rectificativa de ${originalTicket.invoiceCode}. Motivo: ${reason}`,
+      },
+    });
+
+    const newTicket = await tx.ticket.create({
+      data: {
+        venueId,
+        orderId: rectOrder.id,
+        userId,
+        invoiceSeries: rectSeries,
+        invoiceNumber: nextNumber,
+        invoiceCode,
+        subtotal: new Prisma.Decimal(subtotal),
+        vatAmount: new Prisma.Decimal(vatAmount),
+        total: new Prisma.Decimal(total),
+        paymentMethod: originalTicket.paymentMethod,
+        hashSelf,
+        hashPrevious: previousHash,
+        previousInvoiceCode: last?.invoiceCode ?? null,
+        issuedAt,
+        businessName: effectiveName,
+        businessNif: effectiveNif,
+        businessAddress: effectiveAddress,
+        isRectified: false,
+        rectificationReason: `Rectifica a ${originalTicket.invoiceCode}: ${reason}`,
+        rectifiedTicketId: originalTicket.id,
+      },
+    });
+
+    return newTicket;
+  });
+
+  // Envío a AEAT si está activado
+  void (async () => {
+    try {
+      const breakdown = buildTicketBreakdown([{ vatRate: 10, total, subtotal, vatAmount }]);
+      const aeatResult = await submitVerifactuRecord({
+        organisationId: venue.organisationId,
+        invoiceCode: ticketResult.invoiceCode,
+        issuedAt: ticketResult.issuedAt,
+        effectiveNif,
+        effectiveName,
+        description: `Factura Rectificativa de ${originalTicket.invoiceCode}. Motivo: ${reason}`,
+        invoiceKind: 'F2',
+        total,
+        vatAmount,
+        hashSelf: ticketResult.hashSelf,
+        previousRecord: ticketResult.previousInvoiceCode ? {
+          invoiceCode: ticketResult.previousInvoiceCode,
+          issuedAt: ticketResult.issuedAt,
+          hash: ticketResult.hashPrevious,
+        } : null,
+        breakdown,
+      });
+
+      await prisma.ticket.update({
+        where: { id: ticketResult.id },
+        data: {
+          aeatStatus: aeatResult.lineStatus === 'Correcto' ? 'SENT' : (aeatResult.isSimulated ? 'SENT' : 'ERROR'),
+          aeatSentAt: new Date(),
+          aeatResponseCode: aeatResult.code,
+          aeatResponseMsg: aeatResult.message,
+          aeatPayloadJson: JSON.stringify(aeatResult),
+        },
+      });
+    } catch (err) {
+      console.error('[Verifactu] Error enviando rectificativa a AEAT:', err);
+    }
+  })();
+
+  return {
+    rectifyingTicketId: ticketResult.id,
+    rectifyingInvoiceCode: ticketResult.invoiceCode,
+    originalInvoiceCode: originalTicket.invoiceCode,
+    total,
   };
 }

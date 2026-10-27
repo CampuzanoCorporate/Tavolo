@@ -728,6 +728,14 @@ export function TableMapPage() {
                     <strong className="admin-summary-card__value">{Number(cashSummary.billedTotal).toFixed(2)} €</strong>
                   </article>
                   <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Cobrado en efectivo</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.cashSalesTotal).toFixed(2)} €</strong>
+                  </article>
+                  <article className="admin-summary-card">
+                    <span className="admin-summary-card__label">Cobrado con tarjeta</span>
+                    <strong className="admin-summary-card__value">{Number(cashSummary.cardSalesTotal).toFixed(2)} €</strong>
+                  </article>
+                  <article className="admin-summary-card">
                     <span className="admin-summary-card__label">Entradas manuales</span>
                     <strong className="admin-summary-card__value">{Number(cashSummary.manualInTotal).toFixed(2)} €</strong>
                   </article>
@@ -826,7 +834,7 @@ export function TableMapPage() {
                       </div>
                       <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: '#fffdf9', border: '1px solid var(--color-border)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', fontSize: '0.86rem' }}>
-                          <span>Esperado</span>
+                          <span>Efectivo esperado</span>
                           <strong>{Number(cashSummary.expectedAmount).toFixed(2)} €</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', fontSize: '0.9rem', marginTop: 8 }}>
@@ -865,7 +873,7 @@ export function TableMapPage() {
                       >
                         <strong>{ticket.invoiceCode}</strong>
                         <span>
-                          {new Date(ticket.issuedAt).toLocaleString('es-ES')} · {Number(ticket.total).toFixed(2)} €
+                          {new Date(ticket.issuedAt).toLocaleString('es-ES')} · {ticket.paymentMethod === 'CASH' ? 'Efectivo' : 'Tarjeta'} · {Number(ticket.total).toFixed(2)} €
                         </span>
                       </button>
                     ))
