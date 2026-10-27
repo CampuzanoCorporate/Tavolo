@@ -20,7 +20,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/backend/package*.json packages/backend/
 COPY packages/frontend/package*.json packages/frontend/
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/backend/dist ./packages/backend/dist
 COPY --from=build /app/packages/backend/prisma ./packages/backend/prisma
 COPY --from=build /app/packages/backend/src ./packages/backend/src
